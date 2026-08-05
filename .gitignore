@@ -1,0 +1,10 @@
+# Locally-installed agent skills (not part of the repo)
+.agents/
+.opencode
+
+# Spec Kit project state (managed by `specify`)
+.specify/
+specs/
+
+# skills CLI lockfile (local installs)
+skills-lock.json

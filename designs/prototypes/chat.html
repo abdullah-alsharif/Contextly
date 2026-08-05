@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Contextly - AI Chat</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary-fixed-variant": "#3f465c",
+                        "tertiary": "#000000",
+                        "on-tertiary-container": "#75859d",
+                        "secondary-container": "#2170e4",
+                        "on-tertiary-fixed": "#0b1c30",
+                        "inverse-surface": "#2d3133",
+                        "secondary": "#0058be",
+                        "outline-variant": "#c6c6cd",
+                        "surface-dim": "#d8dadc",
+                        "surface-variant": "#e0e3e5",
+                        "secondary-fixed-dim": "#adc6ff",
+                        "on-error-container": "#93000a",
+                        "error-container": "#ffdad6",
+                        "surface-container": "#eceef0",
+                        "surface-container-highest": "#e0e3e5",
+                        "on-surface": "#191c1e",
+                        "outline": "#76777d",
+                        "inverse-on-surface": "#eff1f3",
+                        "inverse-primary": "#bec6e0",
+                        "on-primary": "#ffffff",
+                        "on-background": "#191c1e",
+                        "surface-container-low": "#f2f4f6",
+                        "on-tertiary": "#ffffff",
+                        "tertiary-fixed": "#d3e4fe",
+                        "on-error": "#ffffff",
+                        "primary-container": "#131b2e",
+                        "tertiary-fixed-dim": "#b7c8e1",
+                        "on-secondary": "#ffffff",
+                        "surface-tint": "#565e74",
+                        "on-secondary-fixed-variant": "#004395",
+                        "on-primary-container": "#7c839b",
+                        "surface": "#f7f9fb",
+                        "on-primary-fixed": "#131b2e",
+                        "on-secondary-fixed": "#001a42",
+                        "surface-container-lowest": "#ffffff",
+                        "primary": "#000000",
+                        "on-surface-variant": "#45464d",
+                        "secondary-fixed": "#d8e2ff",
+                        "surface-bright": "#f7f9fb",
+                        "on-tertiary-fixed-variant": "#38485d",
+                        "surface-container-high": "#e6e8ea",
+                        "primary-fixed-dim": "#bec6e0",
+                        "background": "#f7f9fb",
+                        "error": "#ba1a1a",
+                        "tertiary-container": "#0b1c30",
+                        "primary-fixed": "#dae2fd",
+                        "on-secondary-container": "#fefcff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "container-max": "1440px",
+                        "margin-desktop": "32px",
+                        "stack-sm": "8px",
+                        "unit": "4px",
+                        "margin-mobile": "16px",
+                        "stack-xl": "48px",
+                        "gutter": "24px",
+                        "stack-md": "16px",
+                        "stack-xs": "4px",
+                        "stack-lg": "24px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "title-lg": ["Geist"],
+                        "headline-lg": ["Geist"],
+                        "headline-md": ["Geist"],
+                        "label-md": ["Geist"],
+                        "headline-lg-mobile": ["Geist"],
+                        "body-md": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "label-sm": ["Geist"],
+                        "display-lg": ["Geist"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "title-lg": ["20px", { "lineHeight": "28px", "fontWeight": "500" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "label-md": ["14px", { "lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "500" }],
+                        "headline-lg-mobile": ["28px", { "lineHeight": "36px", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }],
+                        "label-sm": ["12px", { "lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "display-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #e0e3e5; /* surface-variant */
+            border-radius: 9999px;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md h-screen overflow-hidden flex">
+<!-- SideNavBar -->
+<aside class="hidden md:flex bg-surface text-secondary font-body-sm h-screen sticky left-0 top-0 w-64 border-r border-outline-variant flex-col py-stack-md px-stack-sm z-20">
+<!-- Header -->
+<div class="mb-stack-lg px-stack-sm flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-secondary-fixed flex items-center justify-center text-on-secondary-fixed">
+<span class="material-symbols-outlined font-[FILL:1]">account_circle</span>
+</div>
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-tertiary">Contextly</h1>
+<p class="font-label-sm text-label-sm text-on-surface-variant">AI Document Platform</p>
+</div>
+</div>
+<!-- CTA -->
+<button class="mb-stack-lg w-full bg-secondary text-on-secondary font-label-md text-label-md py-2 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-secondary/90 transition-transform active:scale-95 duration-200 shadow-sm">
+<span class="material-symbols-outlined text-[18px]">add</span>
+            New Conversation
+        </button>
+<!-- Main Navigation -->
+<nav class="flex-1 flex flex-col gap-1">
+<a class="flex items-center gap-3 px-stack-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors duration-200 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-secondary transition-colors">description</span>
+<span class="font-label-md text-label-md">Documents</span>
+</a>
+<a class="flex items-center gap-3 px-stack-sm py-2 rounded-lg text-secondary font-bold border-r-2 border-secondary bg-surface-container-low transition-colors duration-200 group" href="#">
+<span class="material-symbols-outlined text-[20px] font-[FILL:1]">forum</span>
+<span class="font-label-md text-label-md">Chat</span>
+</a>
+<a class="flex items-center gap-3 px-stack-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors duration-200 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-secondary transition-colors">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</nav>
+<!-- Footer Navigation -->
+<div class="mt-auto pt-stack-md border-t border-surface-variant flex flex-col gap-1">
+<div class="px-stack-sm mb-2">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Recent</span>
+</div>
+<a class="flex items-center gap-3 px-stack-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors duration-200 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-secondary transition-colors">history</span>
+<span class="font-label-md text-label-md truncate">Q3 Financial Analysis</span>
+</a>
+<a class="flex items-center gap-3 px-stack-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors duration-200 group" href="#">
+<span class="material-symbols-outlined text-[20px] group-hover:text-secondary transition-colors">history</span>
+<span class="font-label-md text-label-md truncate">Project Blueprint Summary</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<div class="flex-1 flex flex-col h-screen relative">
+<!-- TopNavBar (Mobile mainly, but keeping structure for layout) -->
+<header class="bg-surface text-secondary font-label-md text-label-md docked full-width top-0 sticky border-b border-outline-variant flex justify-between items-center w-full px-margin-desktop py-stack-sm h-16 z-10 md:px-gutter">
+<div class="flex items-center gap-4">
+<button class="md:hidden text-on-surface-variant hover:text-secondary">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<div class="hidden md:flex items-center px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded-lg focus-within:border-secondary focus-within:ring-2 focus-within:ring-secondary/20 transition-all w-64">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant mr-2">search</span>
+<input class="bg-transparent border-none outline-none text-body-sm w-full placeholder:text-on-surface-variant/70 focus:ring-0 p-0" placeholder="Search conversations..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-secondary text-on-secondary font-label-md text-label-md py-1.5 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-secondary/90 transition-transform active:scale-95 duration-200 shadow-sm">
+                    Upload
+                </button>
+<div class="flex items-center gap-2 border-l border-surface-variant pl-4">
+<button class="text-on-surface-variant hover:text-secondary transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-low">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-on-surface-variant hover:text-secondary transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-low">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<!-- Chat Workspace -->
+<main class="flex-1 flex overflow-hidden bg-surface-container-lowest">
+<!-- Left Panel: Context Selection -->
+<div class="w-72 border-r border-surface-variant bg-surface flex flex-col hidden lg:flex">
+<div class="p-stack-md border-b border-surface-variant bg-surface-container-lowest sticky top-0">
+<h2 class="font-title-lg text-title-lg text-on-surface">Context Selection</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Select documents to ground the AI's responses.</p>
+</div>
+<div class="flex-1 overflow-y-auto custom-scrollbar p-stack-sm space-y-2">
+<!-- Checkbox List -->
+<label class="flex items-start gap-3 p-3 rounded-lg hover:bg-surface-container-low cursor-pointer transition-colors border border-transparent hover:border-surface-variant">
+<div class="mt-0.5">
+<input checked="" class="w-4 h-4 text-secondary border-outline-variant rounded focus:ring-secondary/20" type="checkbox"/>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-[16px] text-secondary">picture_as_pdf</span>
+<span class="font-label-md text-label-md text-on-surface truncate">Project_Blueprint_v2.pdf</span>
+</div>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Uploaded 2 hours ago • 2.4 MB</p>
+</div>
+</label>
+<label class="flex items-start gap-3 p-3 rounded-lg hover:bg-surface-container-low cursor-pointer transition-colors border border-transparent hover:border-surface-variant">
+<div class="mt-0.5">
+<input checked="" class="w-4 h-4 text-secondary border-outline-variant rounded focus:ring-secondary/20" type="checkbox"/>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-[16px] text-secondary">description</span>
+<span class="font-label-md text-label-md text-on-surface truncate">Q3_Financial_Report.docx</span>
+</div>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Uploaded yesterday • 1.1 MB</p>
+</div>
+</label>
+<label class="flex items-start gap-3 p-3 rounded-lg hover:bg-surface-container-low cursor-pointer transition-colors border border-transparent hover:border-surface-variant">
+<div class="mt-0.5">
+<input class="w-4 h-4 text-secondary border-outline-variant rounded focus:ring-secondary/20" type="checkbox"/>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">text_snippet</span>
+<span class="font-label-md text-label-md text-on-surface truncate">Meeting_Notes_Oct.txt</span>
+</div>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Uploaded 3 days ago • 45 KB</p>
+</div>
+</label>
+</div>
+</div>
+<!-- Center Chat Area -->
+<div class="flex-1 flex flex-col bg-surface-container-lowest relative">
+<!-- Messages Area -->
+<div class="flex-1 overflow-y-auto custom-scrollbar p-stack-xl flex flex-col gap-stack-lg max-w-4xl mx-auto w-full">
+<!-- AI Message -->
+<div class="flex gap-4 max-w-[85%]">
+<div class="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0 shadow-sm border border-secondary/10">
+<span class="material-symbols-outlined text-[18px]">smart_toy</span>
+</div>
+<div class="flex flex-col gap-2 w-full">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface">Contextly AI</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">10:42 AM</span>
+</div>
+<div class="bg-surface-container-low p-4 rounded-xl rounded-tl-none border border-outline-variant text-on-surface font-body-md leading-relaxed shadow-sm">
+<p class="mb-4">Based on the provided context, the primary goals for Q4 are outlined in the Project Blueprint. The main objective is to finalize the API integration layer before the end of November.</p>
+<div class="bg-surface p-3 rounded border border-surface-variant my-3 text-body-sm relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-secondary"></div>
+<p class="text-on-surface-variant font-medium mb-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">format_quote</span>
+                                        Excerpt from Source
+                                    </p>
+<p class="text-on-surface italic">"The critical path for Q4 hinges on the successful and timely integration of the external data APIs. This milestone must be achieved by Nov 30th to allow for a month of beta testing."</p>
+</div>
+<p class="mt-4 flex flex-wrap gap-2 items-center">
+                                    References: 
+                                    <span class="inline-flex items-center gap-1 px-2 py-1 bg-tertiary-fixed text-on-tertiary-fixed font-label-sm rounded border border-tertiary-fixed-dim shadow-sm cursor-pointer hover:bg-tertiary-fixed-dim transition-colors" title="View Source">
+<span class="font-bold">[1]</span> Project_Blueprint_v2.pdf, p. 12
+                                    </span>
+</p>
+</div>
+</div>
+</div>
+<!-- User Message -->
+<div class="flex gap-4 max-w-[85%] self-end flex-row-reverse">
+<div class="w-8 h-8 rounded-full bg-surface-variant text-on-surface flex items-center justify-center shrink-0 shadow-sm border border-outline-variant">
+<span class="material-symbols-outlined text-[18px]">person</span>
+</div>
+<div class="flex flex-col gap-2 items-end w-full">
+<div class="flex items-center justify-between w-full flex-row-reverse">
+<span class="font-label-md text-label-md text-on-surface">You</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">10:45 AM</span>
+</div>
+<div class="bg-secondary text-on-secondary p-4 rounded-xl rounded-tr-none shadow-sm">
+<p class="font-body-md">Does the financial report mention any budget constraints for this integration?</p>
+</div>
+</div>
+</div>
+<!-- AI Message (Typing/Generating State - Simulated) -->
+<div class="flex gap-4 max-w-[85%]">
+<div class="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0 shadow-sm border border-secondary/10">
+<span class="material-symbols-outlined text-[18px]">smart_toy</span>
+</div>
+<div class="flex flex-col gap-2 w-full">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface">Contextly AI</span>
+</div>
+<div class="bg-surface-container-low p-4 rounded-xl rounded-tl-none border border-outline-variant shadow-sm w-fit flex items-center gap-2">
+<div class="w-2 h-2 bg-secondary rounded-full animate-bounce" style="animation-delay: 0ms"></div>
+<div class="w-2 h-2 bg-secondary rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+<div class="w-2 h-2 bg-secondary rounded-full animate-bounce" style="animation-delay: 300ms"></div>
+<span class="font-label-sm text-label-sm text-on-surface-variant ml-2">Analyzing documents...</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Input Area -->
+<div class="p-stack-md border-t border-surface-variant bg-surface-container-lowest max-w-4xl mx-auto w-full sticky bottom-0">
+<div class="relative bg-surface rounded-xl border border-outline-variant focus-within:border-secondary focus-within:ring-2 focus-within:ring-secondary/20 transition-all shadow-sm flex flex-col">
+<!-- Selected Context Indicator (Inside Input Box) -->
+<div class="px-4 pt-3 flex flex-wrap gap-2 items-center">
+<span class="font-label-sm text-label-sm text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">database</span>
+                                Using:
+                            </span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-surface-container-high text-on-surface font-label-sm rounded-full border border-outline-variant">
+                                Project_Blueprint_v2.pdf
+                                <button class="hover:text-error ml-1"><span class="material-symbols-outlined text-[12px]">close</span></button>
+</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-surface-container-high text-on-surface font-label-sm rounded-full border border-outline-variant">
+                                Q3_Financial_Report.docx
+                                <button class="hover:text-error ml-1"><span class="material-symbols-outlined text-[12px]">close</span></button>
+</span>
+<button class="text-secondary font-label-sm hover:underline ml-auto flex items-center gap-1 lg:hidden">
+<span class="material-symbols-outlined text-[14px]">edit</span> Edit Context
+                            </button>
+</div>
+<textarea class="w-full bg-transparent border-none outline-none resize-none p-4 text-body-md placeholder:text-on-surface-variant/70 focus:ring-0 custom-scrollbar" placeholder="Ask a question about your documents..." rows="2"></textarea>
+<div class="px-4 pb-3 flex justify-between items-center">
+<div class="flex gap-2">
+<button class="text-on-surface-variant hover:text-secondary p-1 rounded hover:bg-surface-container transition-colors" title="Attach file">
+<span class="material-symbols-outlined">attach_file</span>
+</button>
+<button class="text-on-surface-variant hover:text-secondary p-1 rounded hover:bg-surface-container transition-colors" title="Voice input">
+<span class="material-symbols-outlined">mic</span>
+</button>
+</div>
+<button class="bg-secondary text-on-secondary p-2 rounded-lg hover:bg-secondary/90 transition-transform active:scale-95 flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined font-[FILL:1]">send</span>
+</button>
+</div>
+</div>
+<p class="text-center font-label-sm text-label-sm text-on-surface-variant mt-2">AI can make mistakes. Consider verifying important information.</p>
+</div>
+</div>
+<!-- Right Panel: Sources Detail (Collapsible) -->
+<div class="w-80 border-l border-surface-variant bg-surface flex flex-col hidden xl:flex shadow-[-5px_0_15px_-3px_rgba(0,0,0,0.05)] relative z-10">
+<div class="p-stack-md border-b border-surface-variant flex justify-between items-center bg-surface sticky top-0">
+<h2 class="font-title-lg text-title-lg text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined">plagiarism</span>
+                        Source Viewer
+                    </h2>
+<button class="text-on-surface-variant hover:text-secondary p-1 rounded hover:bg-surface-container">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto custom-scrollbar p-stack-md">
+<!-- Source Card -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg mb-4 overflow-hidden shadow-sm">
+<div class="bg-tertiary-fixed border-b border-outline-variant p-2 px-3 flex items-center gap-2">
+<span class="font-bold text-on-tertiary-fixed text-label-md">[1]</span>
+<span class="font-label-md text-label-md text-on-tertiary-fixed truncate">Project_Blueprint_v2.pdf</span>
+<span class="ml-auto font-label-sm text-label-sm text-on-tertiary-fixed/70">Page 12</span>
+</div>
+<div class="p-4">
+<p class="font-body-sm text-body-sm text-on-surface text-justify leading-relaxed">
+                                ...The critical path for Q4 hinges on the successful and timely integration of the external data APIs. This milestone must be achieved by <mark class="bg-secondary-fixed-dim/50 text-on-surface rounded px-1">Nov 30th to allow for a month of beta testing</mark>. Failure to meet this deadline will push the public launch into Q1 of the following year, which conflicts with marketing commitments...
+                            </p>
+</div>
+<div class="bg-surface-container-low p-2 border-t border-surface-variant flex justify-end">
+<button class="text-secondary font-label-sm flex items-center gap-1 hover:underline">
+                                Open Document <span class="material-symbols-outlined text-[14px]">open_in_new</span>
+</button>
+</div>
+</div>
+<!-- Empty state indicator if no source selected -->
+<!--
+                     <div class="h-full flex flex-col items-center justify-center text-center opacity-50">
+                        <span class="material-symbols-outlined text-[48px] mb-4">find_in_page</span>
+                        <p class="font-label-md text-label-md">Click a citation badge in the chat to view the source document text here.</p>
+                     </div>
+                     -->
+</div>
+</div>
+</main>
+</div>
+</body></html>
