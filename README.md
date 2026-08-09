@@ -66,6 +66,18 @@ reach each other on the container port).
 Push / PR runs `.github/workflows/ci.yml`: backend (ruff + mypy + pytest against a
 Postgres 16 service container) and frontend (tsc + eslint + next build), fail fast.
 
+## Database (Phase 1)
+
+`make migrate` now creates the full application schema (profiles, documents,
+document_chunks with `vector(1024)` + HNSW index, conversations, conversation_documents,
+messages) from `infrastructure/migrations/0001_init.sql` — plain reviewed SQL, no ORM
+magic.
+
+Tenant isolation is enforced at the database by Row Level Security on every tenant table
+(see `docs/multi-tenancy.md`). Runtime queries must connect as the `contextly_app` role
+(LOGIN, no `BYPASSRLS`); the compose `db` user is a superuser and bypasses RLS, so it is
+only for migrations/admin. Contract: `specs/002-database-schema/contracts/database.md`.
+
 ## Repo layout
 
 ```

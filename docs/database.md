@@ -174,6 +174,25 @@ Notes:
   hard-deleted by the API when a document is deleted.
 - No `updated_at` on chunks — immutable after write; chunk metadata edits are re-inserts.
 
+### Local-dev auth shim & runtime role
+
+`0001_init.sql` runs on self-hosted Postgres (compose, no Supabase) *and* Supabase-hosted
+Postgres. Because the local image has no `auth` schema, the migration creates a
+dev-compatible shim that no-ops against the real Supabase schema:
+
+- `auth.users (id uuid primary key)` via `create table if not exists` (Supabase's real
+  `auth.users` already exists there — untouched).
+- `auth.uid()` via `create or replace function` using Supabase's current cloud
+  implementation (`coalesce` over `request.jwt.claim.sub` and the `request.jwt.claims`
+  JSON fallback). RLS policies use `auth.uid()`; with no claim set it returns NULL and
+  every policy fails closed.
+
+The same migration creates `contextly_app`, a LOGIN role with no `BYPASSRLS`, granted
+`CONNECT`, `USAGE`, SELECT/INSERT/UPDATE/DELETE on the application tables, and `ALTER
+DEFAULT PRIVILEGES` so future tables inherit the grants (see
+[multi-tenancy.md](multi-tenancy.md) §2). Runtime queries must use this role; the
+superuser is only for migrations/admin.
+
 ## 3. pgvector design
 
 - Column: `embedding vector(1024)` — dimension **must equal the locked embedding model's

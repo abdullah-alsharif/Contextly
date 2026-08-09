@@ -27,6 +27,15 @@ alter table conversations enable row level security;
 alter table conversation_documents enable row level security;
 alter table messages enable row level security;
 alter table document_chunks enable row level security;
+alter table profiles enable row level security;
+
+-- FORCE keeps RLS active even for the table owner (superusers are always exempt).
+alter table documents force row level security;
+alter table conversations force row level security;
+alter table conversation_documents force row level security;
+alter table messages force row level security;
+alter table document_chunks force row level security;
+alter table profiles force row level security;
 
 create policy documents_user_isolation on documents
   using (user_id = auth.uid())
@@ -65,9 +74,19 @@ create policy profiles_user_isolation on profiles
 
 - Supabase Auth sets the `request.jwt.claims` / `auth.uid()` for queries made with the
   user's JWT. RLS then runs automatically for any SQL executed with a user token.
-- **Critical rule:** the backend (FastAPI) connects with a **non-`postgres` role** that
+- **Critical rule:** the backend (FastAPI) connects with a non-`postgres` role that
   does **not** bypass RLS. If the service-role key were used for runtime queries, RLS
   would be skipped — that key is only for migrations/admin paths, never runtime reads.
+- **Runtime role:** `0001_init.sql` creates `contextly_app` (LOGIN, no `BYPASSRLS`) and
+  grants it SELECT/INSERT/UPDATE/DELETE on the application tables plus `ALTER DEFAULT
+  PRIVILEGES` for future tables. Runtime queries must connect as `contextly_app`; the
+  compose `db` superuser is for migrations/admin only. Least privilege is completed by
+  `revoke create on schema public from public`.
+- **Local dev without Supabase:** the local Postgres image has no `auth` schema, so the
+  migration creates a shim — `auth.users (id uuid primary key)` and an `auth.uid()`
+  function semantically identical to Supabase's (reads `request.jwt.claim.sub` /
+  `request.jwt.claims`). Tests and dev exercise RLS with
+  `set_config('request.jwt.claim.sub', '<user-uuid>', false)`.
 
 ### Belt-and-suspenders
 
