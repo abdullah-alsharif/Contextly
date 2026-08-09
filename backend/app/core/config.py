@@ -18,10 +18,13 @@ class Settings(BaseSettings):
     ai_provider: str = "fake"
     storage_provider: str = "local"
     local_storage_dir: str = "/data/storage"
+    storage_bucket: str = "documents"
+    upload_max_bytes: int = 10 * 1024 * 1024
     auth_mode: str = "dev"
     app_env: str = "dev"
     dev_jwt_secret: str = "contextly-dev-secret-0123456789abcdef"
     supabase_url: str = ""
+    supabase_service_role_key: str = ""
     supabase_jwt_secret: str = ""
     supabase_jwks_url: str = ""
     jwt_leeway_seconds: int = 30

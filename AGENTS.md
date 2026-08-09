@@ -56,4 +56,5 @@ make migrate   # apply infrastructure/migrations
 make test      # backend pytest
 ```
 
-Current task: **Phase 0** (project setup) per `docs/roadmap.md`.
+Current task: **Phase 3** (document upload + storage) per `docs/roadmap.md` —
+spec/plan/tasks in `specs/004-document-upload-storage/`.

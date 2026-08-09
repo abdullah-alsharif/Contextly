@@ -16,6 +16,8 @@ from starlette.responses import Response
 
 from app.api import api_router
 from app.core.config import Settings, get_settings
+from app.providers.storage import build_storage_provider
+from app.providers.storage.base import StorageProvider
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ def default_health_checks(settings: Settings) -> dict[str, HealthProbe]:
 def create_app(
     settings: Settings | None = None,
     health_checks: Mapping[str, HealthProbe] | None = None,
+    storage_provider: StorageProvider | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_settings.validate_auth()
@@ -63,6 +66,7 @@ def create_app(
         docs_url=None,
         redoc_url=None,
     )
+    app.state.storage_provider = storage_provider or build_storage_provider(resolved_settings)
 
     app.add_middleware(
         CORSMiddleware,

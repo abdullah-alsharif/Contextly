@@ -1,0 +1,128 @@
+"""Documents router: POST/GET/GET{id}/DELETE /documents (docs/api.md §2).
+
+Every endpoint is guarded by the router-level get_current_user dependency, so
+unauthenticated requests get 401 by construction (contracts/auth.md §1). Error
+mapping: 400 invalid upload, 413 oversized, 404 not owned/nonexistent/deleted,
+502 upstream storage failure (docs/api.md §2, §6).
+"""
+from __future__ import annotations
+
+import logging
+import uuid
+from typing import Literal
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import Settings, get_settings
+from app.core.security.deps import get_current_user
+from app.core.security.identity import Identity
+from app.db.session import get_db
+from app.providers.storage.base import StorageProvider
+from app.schemas.document import DocumentOut
+from app.services.documents import (
+    DocumentNotFoundError,
+    InvalidUploadError,
+    UploadFailedError,
+    UploadTooLargeError,
+    create_document,
+    delete_document,
+    get_document,
+    list_documents,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/documents",
+    tags=["documents"],
+    dependencies=[Depends(get_current_user)],
+)
+
+
+def get_storage_provider(request: Request) -> StorageProvider:
+    """The app-scoped storage provider (injectable in tests via create_app)."""
+    provider: StorageProvider = request.app.state.storage_provider
+    return provider
+
+
+async def _read_upload(file: UploadFile, settings: Settings) -> bytes:
+    """Stream the upload in 1 MB chunks; enforce the size cap (docs/security.md §3)."""
+    total = 0
+    chunks: list[bytes] = []
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > settings.upload_max_bytes:
+            raise UploadTooLargeError(
+                f"file exceeds the {settings.upload_max_bytes} byte upload limit"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post("", response_model=DocumentOut, status_code=201)
+async def upload_document(
+    file: UploadFile = File(...),
+    identity: Identity = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    storage: StorageProvider = Depends(get_storage_provider),
+) -> dict[str, object]:
+    """Upload a validated PDF and return the document with status 'uploaded'."""
+    try:
+        data = await _read_upload(file, settings)
+        return await create_document(
+            db,
+            storage,
+            settings,
+            identity,
+            filename=file.filename or "",
+            content_type=file.content_type or "",
+            data=data,
+        )
+    except InvalidUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except UploadFailedError as exc:
+        logger.error("upload failed for user %s: %s", identity.user_id, exc)
+        raise HTTPException(
+            status_code=502, detail="file storage is unavailable"
+        ) from exc
+
+
+@router.get("", response_model=list[DocumentOut])
+async def get_documents(
+    status: Literal["uploaded", "processing", "ready", "failed", "deleted"] | None = None,
+    identity: Identity = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, object]]:
+    """List the caller's documents, newest first, optionally filtered by status."""
+    return await list_documents(db, identity, status=status)
+
+
+@router.get("/{document_id}", response_model=DocumentOut)
+async def get_document_detail(
+    document_id: uuid.UUID,
+    identity: Identity = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Return one of the caller's documents; non-owned ids behave as 404."""
+    try:
+        return await get_document(db, identity, document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/{document_id}", status_code=204)
+async def remove_document(
+    document_id: uuid.UUID,
+    identity: Identity = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageProvider = Depends(get_storage_provider),
+) -> None:
+    """Soft-delete the document and remove its stored file (docs/ingestion.md §7)."""
+    try:
+        await delete_document(db, storage, identity, document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

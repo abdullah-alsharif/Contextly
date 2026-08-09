@@ -73,10 +73,12 @@ defensible auth, and prompt-injection mitigation. Everything else is proportiona
 | `SUPABASE_JWT_SECRET` | HS256 JWT validation (legacy Supabase tokens); at least one of secret or JWKS URL required |
 | `SUPABASE_JWKS_URL` | RS256 JWKS endpoint (default derived from `SUPABASE_URL`); fetched and cached (300s) |
 | `JWT_LEEWAY_SECONDS` | clock-skew leeway for JWT validation (default 30) |
-| `SUPABASE_SERVICE_ROLE_KEY` | storage uploads from backend (worker + upload) — never in frontend |
+| `SUPABASE_SERVICE_ROLE_KEY` | storage uploads + deletes from the backend (API + worker) — never in frontend |
 | `DATABASE_URL` | Postgres (runtime role, RLS-respecting) |
 | `NVIDIA_API_KEY` / `OPENROUTER_API_KEY` | AI provider (one per selected provider) |
-| `STORAGE_PROVIDER`, `AI_PROVIDER` | module selection |
+| `STORAGE_PROVIDER`, `AI_PROVIDER` | module selection (`local`/`supabase`, `fake`/`nvidia`/`openrouter`) |
+| `STORAGE_BUCKET` | Supabase storage bucket name (default `documents`) |
+| `UPLOAD_MAX_BYTES` | per-file upload cap enforced in the API before processing (default 10485760) |
 
 ## 7. Accepted risks (documented, not ignored)
 
