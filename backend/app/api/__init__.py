@@ -1,4 +1,14 @@
-"""Router registration. Business routes (/api/v1) land in later phases."""
+"""Router registration. Business routes (/api/v1) are auth-guarded.
+
+Guard wiring (contracts/auth.md §1, spec US3): EVERY business router added in
+later phases MUST apply `dependencies=[Depends(get_current_user)]` — either at
+the APIRouter level or per endpoint — so unauthenticated requests get 401 by
+construction. Auth's own `me` route is itself guarded. /healthz and / stay
+outside /api/v1 and unauthenticated (infrastructure).
+"""
 from fastapi import APIRouter
 
+from app.api.auth import router as auth_router
+
 api_router = APIRouter(prefix="/api/v1")
+api_router.include_router(auth_router)

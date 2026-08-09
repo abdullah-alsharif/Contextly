@@ -67,7 +67,12 @@ defensible auth, and prompt-injection mitigation. Everything else is proportiona
 
 | Env var | Purpose |
 |---|---|
-| `SUPABASE_URL` / `SUPABASE_JWT_SECRET` (or JWKS URL) | JWT validation |
+| `AUTH_MODE` | `dev` (well-known secret) or `supabase` (JWT validation). Dev mode only allowed when `APP_ENV=dev` (startup guard) |
+| `DEV_JWT_SECRET` | dev-mode JWT signing secret (well-known default `contextly-dev-secret-0123456789abcdef`, env-overridable; never a real secret) |
+| `SUPABASE_URL` | JWT issuer (`.auth/v1` suffix derived at startup); required for Supabase auth mode |
+| `SUPABASE_JWT_SECRET` | HS256 JWT validation (legacy Supabase tokens); at least one of secret or JWKS URL required |
+| `SUPABASE_JWKS_URL` | RS256 JWKS endpoint (default derived from `SUPABASE_URL`); fetched and cached (300s) |
+| `JWT_LEEWAY_SECONDS` | clock-skew leeway for JWT validation (default 30) |
 | `SUPABASE_SERVICE_ROLE_KEY` | storage uploads from backend (worker + upload) — never in frontend |
 | `DATABASE_URL` | Postgres (runtime role, RLS-respecting) |
 | `NVIDIA_API_KEY` / `OPENROUTER_API_KEY` | AI provider (one per selected provider) |

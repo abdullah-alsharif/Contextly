@@ -5,7 +5,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Backend configuration, populated from environment (dev-safe defaults)."""
+    """Backend configuration, populated from environment (dev-safe defaults).
+
+    Auth contract: specs/003-jwt-authentication/contracts/auth.md §7.
+    """
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -16,9 +19,22 @@ class Settings(BaseSettings):
     storage_provider: str = "local"
     local_storage_dir: str = "/data/storage"
     auth_mode: str = "dev"
+    app_env: str = "dev"
+    dev_jwt_secret: str = "contextly-dev-secret-0123456789abcdef"
+    supabase_url: str = ""
+    supabase_jwt_secret: str = ""
+    supabase_jwks_url: str = ""
+    jwt_leeway_seconds: int = 30
     cors_origins: str = "http://localhost:3000"
     # Directory of numbered SQL migration files, relative to the workdir.
     migrations_dir: str = "infrastructure/migrations"
+
+    @field_validator("auth_mode")
+    @classmethod
+    def _validate_auth_mode(cls, value: str) -> str:
+        if value not in ("dev", "supabase"):
+            raise ValueError(f"auth_mode must be 'dev' or 'supabase', got {value!r}")
+        return value
 
     @field_validator("cors_origins")
     @classmethod
@@ -32,6 +48,44 @@ class Settings(BaseSettings):
             for origin in self.cors_origins.split(",")
             if origin.strip()
         ]
+
+    def validate_auth(self) -> None:
+        """Fail loudly on unsafe auth configuration (contracts/auth.md §2-3).
+
+        - dev mode is only ever allowed in a dev environment.
+        - supabase mode requires something to verify against.
+        Called at app startup; a misconfiguration aborts the process.
+        """
+        if self.auth_mode == "dev" and self.app_env != "dev":
+            raise RuntimeError(
+                "AUTH_MODE=dev is only allowed when APP_ENV=dev "
+                f"(got APP_ENV={self.app_env!r})"
+            )
+        if self.auth_mode == "supabase":
+            jwks = self.supabase_jwks_url or (
+                f"{self.supabase_url}/auth/v1/.well-known/jwks.json"
+                if self.supabase_url
+                else ""
+            )
+            if not self.supabase_jwt_secret and not jwks:
+                raise RuntimeError(
+                    "AUTH_MODE=supabase requires SUPABASE_JWT_SECRET (HS256) "
+                    "or SUPABASE_URL/SUPABASE_JWKS_URL (RS256)"
+                )
+
+    @property
+    def supabase_jwks_url_resolved(self) -> str:
+        """JWKS endpoint for RS256 verification; empty when unavailable."""
+        if self.supabase_jwks_url:
+            return self.supabase_jwks_url
+        if self.supabase_url:
+            return f"{self.supabase_url}/auth/v1/.well-known/jwks.json"
+        return ""
+
+    @property
+    def supabase_issuer(self) -> str:
+        """Expected `iss` claim for Supabase-issued tokens."""
+        return f"{self.supabase_url}/auth/v1"
 
 
 @lru_cache

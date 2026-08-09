@@ -1,7 +1,8 @@
 """FastAPI application: CORS, request-id middleware, hello-world + /healthz.
 
 Business routes land under /api/v1 in later phases (docs/api.md); health is
-infrastructure and stays at root (contracts/healthz.md, research.md D3).
+infrastructure and stays at root (contracts/healthz.md, research.md D3). Auth
+configuration is validated at startup (fails loudly on unsafe modes).
 """
 import logging
 import uuid
@@ -51,6 +52,7 @@ def create_app(
     health_checks: Mapping[str, HealthProbe] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
+    resolved_settings.validate_auth()
     checks = (
         dict(health_checks) if health_checks is not None else default_health_checks(resolved_settings)
     )

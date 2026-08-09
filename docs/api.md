@@ -19,7 +19,7 @@ the backend only validates JWTs. The backend exposes `/auth/me` for the profile.
 |---|---|---|---|---|---|
 | POST | `/auth/register`* | none | uses Supabase `signUp` | n/a | delegated to Supabase |
 | POST | `/auth/login`* | none | uses Supabase `signIn` | n/a | delegated |
-| POST | `/auth/me` | JWT | – | `200 {profile}` | 401 |
+| GET | `/auth/me` | JWT | – | `200 {profile}` | 401 |
 | POST | `/auth/logout`* | JWT | – | 204 | – |
 
 \* forwarded/proxied by the frontend server to Supabase; not part of FastAPI in MVP.
