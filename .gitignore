@@ -1,6 +1,6 @@
 # Locally-installed agent skills (not part of the repo)
 .agents/
-.opencode
+.opencode/
 
 # Spec Kit project state (managed by `specify`)
 .specify/
@@ -8,3 +8,40 @@ specs/
 
 # skills CLI lockfile (local installs)
 skills-lock.json
+
+# Phase 0 project files (T001)
+/backend/.venv/
+/backend/__pycache__/
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Builds
+.next/
+dist/
+build/
+*.tsbuildinfo
+
+# Env files (never commit local envs/secrets; example files stay tracked)
+.env
+.env*.local
+.env.*
+!.env.example
+!**/.env*.example
+
+# Local state (T024)
+/data/
+*.local
+
+# Python caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Misc
+.DS_Store
+*.log

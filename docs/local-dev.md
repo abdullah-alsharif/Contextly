@@ -69,7 +69,7 @@ services:
   backend:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql+asyncpg://contextly:contextly@db:5432/contextly
+      DATABASE_URL: postgresql://contextly:contextly@db:5432/contextly
       AI_PROVIDER: fake
       STORAGE_PROVIDER: local
       LOCAL_STORAGE_DIR: /data/storage
@@ -105,6 +105,12 @@ volumes:
 runs without Supabase. Production switches to real JWT verification via env — one code
 path (a `get_current_user` dependency that delegates to `DevAuthenticator` or
 `SupabaseJWTVerifier`).
+
+**DATABASE_URL scheme:** the env surface uses the plain `postgresql://` scheme
+(no `+asyncpg` dialect suffix) — it is consumed directly by the sync psycopg
+migrations runner and health probe (`backend/app/migrate.py`, `backend/app/main.py`).
+The async SQLAlchemy engine in Phase 1 derives its `postgresql+asyncpg://` dialect at
+the engine layer from the same `DATABASE_URL`; the env var keeps a single scheme.
 
 ## 4. First run (3 commands)
 
