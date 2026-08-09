@@ -76,6 +76,10 @@ _SOFT_DELETE = text(
     """
 )
 
+_PURGE_CHUNKS = text(
+    "delete from document_chunks where document_id = :document_id"
+)
+
 
 class InvalidUploadError(Exception):
     """Upload rejected by a validation rule (→ 400)."""
@@ -192,10 +196,13 @@ async def delete_document(
     identity: Identity,
     document_id: uuid.UUID,
 ) -> None:
-    """Soft-delete the row and remove the storage object (docs/ingestion.md §7).
+    """Soft-delete the row, purge chunks, and remove the storage object.
 
-    The row is hidden first so the delete is safe even if storage is degraded;
-    a storage failure is logged and the object is reclaimed later (research.md R4).
+    The chunk purge happens in the same transaction as the soft delete so no
+    chunks survive for a deleted document (docs/ingestion.md §7, research.md
+    R5, spec US4). The row is hidden first so the delete is safe even if
+    storage is degraded; a storage failure is logged and the object is
+    reclaimed later (research.md R4).
     """
     result = await db.execute(
         _SOFT_DELETE,
@@ -204,6 +211,7 @@ async def delete_document(
     row = result.one_or_none()
     if row is None:
         raise DocumentNotFoundError("document not found")
+    await db.execute(_PURGE_CHUNKS, {"document_id": str(document_id)})
     storage_path = row.storage_path
     try:
         await storage.delete(key=storage_path)

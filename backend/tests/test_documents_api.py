@@ -7,6 +7,7 @@ list/detail isolation (200/404/422), delete semantics (204/404), cross-tenant
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 
@@ -21,7 +22,9 @@ from app.core.security.dev import dev_token
 from app.db.session import get_db
 from app.main import create_app
 from app.providers.storage.base import StorageError
+from app.services import pipeline
 from app.services.documents import sanitize_filename
+from tests.pdf_fixtures import make_pdf
 
 DEV_SECRET = "contextly-dev-secret-0123456789abcdef"
 MAX_UPLOAD = 10 * 1024 * 1024
@@ -385,3 +388,65 @@ def test_delete_nonexistent_404(client: TestClient) -> None:
 
 def test_delete_missing_auth_401(client: TestClient) -> None:
     assert client.delete(f"/api/v1/documents/{uuid.uuid4()}").status_code == 401
+
+
+def test_delete_purges_processed_chunks(client: TestClient) -> None:
+    """US4: DELETE removes the chunks of an already-processed document (quickstart
+    VS-6; docs/ingestion.md §7). Processing is driven through the Phase 4
+    pipeline so the API path sees a fully-ready document."""
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from document_chunks where document_id in "
+                "(select id from documents where user_id = any(%s))",
+                ([str(USER_A), str(USER_B)],),
+            )
+            cur.execute(
+                "delete from documents where user_id = any(%s)",
+                ([str(USER_A), str(USER_B)],),
+            )
+        conn.commit()
+
+    status, doc = _upload(client, _token(USER_A), content=make_pdf(["Deletable content"]))
+    assert status == 201
+    document_id = uuid.UUID(doc["id"])
+
+    async def process() -> None:
+        storage = client.app.state.storage_provider  # type: ignore[attr-defined]
+        settings = Settings(
+            database_url=os.environ["DATABASE_URL"],
+            auth_mode="dev",
+            app_env="dev",
+        )
+        async with _TestSessionFactory() as db:
+            claimed = await pipeline.claim_next(db, lease_seconds=300)
+            assert claimed is not None and claimed.id == document_id
+            await db.commit()
+        async with _TestSessionFactory() as db:
+            outcome = await pipeline.process_claimed_document(db, storage, settings, claimed)
+            assert outcome == "ready"
+            await db.commit()
+
+    asyncio.run(process())
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) from document_chunks where document_id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone()[0] == 1
+
+    response = client.delete(
+        f"/api/v1/documents/{document_id}",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
+    )
+    assert response.status_code == 204
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) from document_chunks where document_id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone()[0] == 0

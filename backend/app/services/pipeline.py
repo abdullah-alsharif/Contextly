@@ -1,0 +1,278 @@
+"""Document processing pipeline: claim → download → parse → chunk → persist.
+
+One session per document (docs/ingestion.md §3, research.md R6). The claim is
+the single RLS-bypassing surface (worker_claim_next, SECURITY DEFINER); after
+claiming, this module switches the session transaction-locally to the runtime
+role + the document owner's claim, so every chunk INSERT and status UPDATE runs
+under the FORCE-RLS policies (docs/multi-tenancy.md §2/§3, contracts/worker.md
+§1). Failure classes per research.md R4: permanent ParseError → failed now;
+transient storage failures → deferred-lease retry, then failed.
+"""
+from __future__ import annotations
+
+import asyncio
+import uuid
+from dataclasses import dataclass
+from io import BytesIO
+from logging import getLogger
+from time import perf_counter
+from typing import Literal
+
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError, PdfStreamError
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import Settings
+from app.providers.storage.base import StorageError, StorageProvider
+from app.services.chunker import CHARS_PER_TOKEN, Chunk, ParseError, chunk_pages
+
+logger = getLogger(__name__)
+
+RLS_ROLE = "contextly_app"
+
+Outcome = Literal["ready", "retry", "failed", "stale"]
+
+_CLAIM = text("SELECT * FROM worker_claim_next(:lease_seconds)")
+
+_INSERT_CHUNK = text(
+    """
+    insert into document_chunks
+        (document_id, chunk_index, content, page_number, token_count, metadata)
+    values (:document_id, :chunk_index, :content, :page_number, :token_count, :metadata)
+    """
+)
+
+_FINALIZE = text(
+    """
+    update documents
+    set status = 'ready',
+        total_chunks = :total_chunks,
+        status_error = null,
+        lease_until = null,
+        updated_at = now()
+    where id = :id and status = 'processing' and deleted_at is null
+    returning id
+    """
+)
+
+_FAIL_PERMANENT = text(
+    """
+    update documents
+    set status = 'failed', status_error = :message, lease_until = null, updated_at = now()
+    where id = :id and deleted_at is null
+    """
+)
+
+_FAIL_TRANSIENT = text(
+    """
+    update documents
+    set status = 'uploaded',
+        retry_count = :retry_count,
+        status_error = :message,
+        lease_until = now() + make_interval(secs => :backoff_seconds),
+        updated_at = now()
+    where id = :id and deleted_at is null
+    """
+)
+
+_EXHAUST_RETRIES = text(
+    """
+    update documents
+    set status = 'failed',
+        retry_count = :retry_count,
+        status_error = :message,
+        lease_until = null,
+        updated_at = now()
+    where id = :id and deleted_at is null
+    """
+)
+
+
+@dataclass(frozen=True)
+class ClaimedDocument:
+    """The identity fields worker_claim_next returns — never document content."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    storage_path: str
+    filename: str
+    retry_count: int
+
+
+class StaleClaimError(Exception):
+    """The claimed document is gone or was re-claimed; persist must roll back."""
+
+
+async def claim_next(db: AsyncSession, *, lease_seconds: int) -> ClaimedDocument | None:
+    """Atomically claim one eligible document (contracts/worker.md §2)."""
+    result = await db.execute(_CLAIM, {"lease_seconds": lease_seconds})
+    row = result.one_or_none()
+    if row is None:
+        return None
+    return ClaimedDocument(
+        id=row.id,
+        user_id=row.user_id,
+        storage_path=row.storage_path,
+        filename=row.filename,
+        retry_count=row.retry_count,
+    )
+
+
+def parse_pdf(data: bytes) -> list[str]:
+    """Extract per-page text (research.md R2). Runs in a thread by the caller."""
+    try:
+        reader = PdfReader(BytesIO(data))
+        if reader.is_encrypted:
+            try:
+                reader.decrypt("")
+            except Exception as exc:  # noqa: BLE001 - map any decrypt failure
+                raise ParseError("corrupt or unreadable PDF") from exc
+        pages = [page.extract_text() or "" for page in reader.pages]
+    except (PdfReadError, PdfStreamError, ValueError, TypeError) as exc:
+        raise ParseError("corrupt or unreadable PDF") from exc
+    return pages
+
+
+async def _switch_to_owner(db: AsyncSession, claimed: ClaimedDocument) -> None:
+    """Run the rest of the transaction as the runtime role under the owner's RLS claim."""
+    await db.execute(text(f"SET LOCAL ROLE {RLS_ROLE}"))
+    await db.execute(
+        text("SELECT set_config('request.jwt.claim.sub', :sub, true)"),
+        {"sub": str(claimed.user_id)},
+    )
+
+
+async def _fail_permanent(db: AsyncSession, claimed: ClaimedDocument, message: str) -> Outcome:
+    await db.execute(
+        _FAIL_PERMANENT, {"id": str(claimed.id), "message": message}
+    )
+    return "failed"
+
+
+async def _fail_transient(
+    db: AsyncSession,
+    settings: Settings,
+    claimed: ClaimedDocument,
+    message: str,
+) -> Outcome:
+    retry_count = claimed.retry_count + 1
+    if retry_count < settings.worker_max_retries:
+        backoff = settings.worker_retry_backoff_seconds_list[
+            min(retry_count - 1, len(settings.worker_retry_backoff_seconds_list) - 1)
+        ]
+        await db.execute(
+            _FAIL_TRANSIENT,
+            {
+                "id": str(claimed.id),
+                "retry_count": retry_count,
+                "message": message,
+                "backoff_seconds": backoff,
+            },
+        )
+        return "retry"
+    await db.execute(
+        _EXHAUST_RETRIES,
+        {"id": str(claimed.id), "retry_count": retry_count, "message": message},
+    )
+    return "failed"
+
+
+async def _persist(db: AsyncSession, claimed: ClaimedDocument, chunks: list[Chunk]) -> None:
+    for index, chunk in enumerate(chunks):
+        await db.execute(
+            _INSERT_CHUNK,
+            {
+                "document_id": str(claimed.id),
+                "chunk_index": index,
+                "content": chunk.content,
+                "page_number": chunk.page_start,
+                "token_count": chunk.token_count,
+                "metadata": f'{{"page_start": {chunk.page_start}, "page_end": {chunk.page_end}}}',
+            },
+        )
+    result = await db.execute(
+        _FINALIZE, {"id": str(claimed.id), "total_chunks": len(chunks)}
+    )
+    if result.one_or_none() is None:
+        raise StaleClaimError("document deleted or re-claimed during processing")
+
+
+async def process_claimed_document(
+    db: AsyncSession,
+    storage: StorageProvider,
+    settings: Settings,
+    claimed: ClaimedDocument,
+) -> Outcome:
+    """Run one claimed document through the pipeline (contracts/worker.md §4–5).
+
+    Failure classes (research.md R4): ParseError is permanent → failed now;
+    StorageError and any unexpected exception (poison PDFs, provider bugs) are
+    transient → deferred-lease retry that exhausts into failed after
+    worker_max_retries. Unexpected exceptions never escape: the worker loop
+    must survive arbitrary input (convergence finding F1).
+    """
+    await _switch_to_owner(db, claimed)
+    started = perf_counter()
+    try:
+        try:
+            data = await storage.download(key=claimed.storage_path)
+        except StorageError as exc:
+            message = f"storage read failed: {exc}"
+            logger.warning("doc %s transient failure | class=transient | %s", claimed.id, message)
+            return await _fail_transient(db, settings, claimed, message)
+
+        try:
+            pages = await asyncio.to_thread(parse_pdf, data)
+        except ParseError as exc:
+            message = str(exc)
+            logger.warning("doc %s permanent failure | class=permanent | %s", claimed.id, message)
+            return await _fail_permanent(db, claimed, message)
+
+        try:
+            chunks = chunk_pages(
+                pages,
+                chunk_size_chars=round(settings.chunk_size_tokens * CHARS_PER_TOKEN),
+                overlap_chars=round(settings.chunk_overlap_tokens * CHARS_PER_TOKEN),
+            )
+        except ParseError as exc:
+            message = str(exc)
+            logger.warning("doc %s permanent failure | class=permanent | %s", claimed.id, message)
+            return await _fail_permanent(db, claimed, message)
+
+        try:
+            async with db.begin_nested():
+                await _persist(db, claimed, chunks)
+        except StaleClaimError:
+            logger.warning("doc %s stale claim — rolling back persist", claimed.id)
+            return "stale"
+    except Exception as exc:
+        message = f"unexpected processing failure: {exc}"
+        logger.exception(
+            "doc %s unexpected failure | class=transient | %s",
+            claimed.id,
+            message,
+        )
+        return await _fail_transient(db, settings, claimed, message)
+
+    logger.info(
+        "doc %s done | stage=finalize | duration_ms=%.0f | page_count=%d | chunk_count=%d | total_tokens=%d",
+        claimed.id,
+        (perf_counter() - started) * 1000,
+        len(pages),
+        len(chunks),
+        sum(chunk.token_count for chunk in chunks),
+    )
+    return "ready"
+
+
+async def rearm_lease(db: AsyncSession, claimed: ClaimedDocument, lease_seconds: int) -> None:
+    """Heartbeat: extend the claim's lease under the owner's RLS session (contracts §3)."""
+    await _switch_to_owner(db, claimed)
+    await db.execute(
+        text(
+            "update documents set lease_until = now() + make_interval(secs => :lease)"
+            " where id = :id and status = 'processing'"
+        ),
+        {"lease": lease_seconds, "id": str(claimed.id)},
+    )

@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     # Directory of numbered SQL migration files, relative to the workdir.
     migrations_dir: str = "infrastructure/migrations"
+    # Worker loop (docs/ingestion.md §3): poll interval, claim lease, retry policy.
+    worker_poll_interval_seconds: int = 5
+    worker_lease_seconds: int = 300
+    worker_max_retries: int = 3
+    worker_retry_backoff_seconds: str = "1,5,30"
+    # Chunking defaults (docs/ingestion.md §4.3, docs/rag.md §3).
+    chunk_size_tokens: int = 500
+    chunk_overlap_tokens: int = 50
 
     @field_validator("auth_mode")
     @classmethod
@@ -89,6 +97,14 @@ class Settings(BaseSettings):
     def supabase_issuer(self) -> str:
         """Expected `iss` claim for Supabase-issued tokens."""
         return f"{self.supabase_url}/auth/v1"
+
+    @property
+    def worker_retry_backoff_seconds_list(self) -> list[int]:
+        return [
+            int(seconds.strip())
+            for seconds in self.worker_retry_backoff_seconds.split(",")
+            if seconds.strip()
+        ]
 
 
 @lru_cache
