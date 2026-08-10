@@ -22,6 +22,8 @@ from sqlalchemy.pool import NullPool
 from app import worker
 from app.core.config import Settings
 from app.core.security.identity import Identity
+from app.providers.ai import build_ai_provider
+from app.providers.ai.base import AIProvider, AIProviderError
 from app.providers.storage.base import StorageError
 from app.providers.storage.local import LocalStorageProvider
 from app.services import pipeline
@@ -139,14 +141,34 @@ def _chunk_rows(document_id: uuid.UUID) -> list[tuple]:
             return cur.fetchall()
 
 
+def _chunk_embeddings(document_id: uuid.UUID) -> list[tuple]:
+    """(chunk_index, vector_dims, embedding) for each chunk row (admin view)."""
+    with _admin() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select chunk_index, vector_dims(embedding), embedding "
+                "from document_chunks where document_id = %s order by chunk_index",
+                (document_id,),
+            )
+            return cur.fetchall()
+
+
+def _fake_ai() -> AIProvider:
+    """Deterministic offline provider for pipeline tests (contracts §3)."""
+    return build_ai_provider(_SETTINGS)
+
+
 async def _run_pipeline(document_id: uuid.UUID, storage: LocalStorageProvider) -> str:
+    ai = _fake_ai()
     async with _SessionFactory() as db:
         claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
         assert claimed is not None, "expected a claimable document"
         assert str(claimed.id) == str(document_id)
         await db.commit()
     async with _SessionFactory() as db:
-        outcome = await pipeline.process_claimed_document(db, storage, _SETTINGS, claimed)
+        outcome = await pipeline.process_claimed_document(
+            db, storage, _SETTINGS, claimed, ai
+        )
         if outcome in ("ready", "failed", "retry"):
             await db.commit()
         else:
@@ -506,7 +528,9 @@ def test_heartbeat_rearms_lease_mid_run(tmp_path: Path) -> None:
             try:
                 async with _SessionFactory() as db:
                     process = asyncio.create_task(
-                        pipeline.process_claimed_document(db, storage, hb_settings, claimed)
+                        pipeline.process_claimed_document(
+                            db, storage, hb_settings, claimed, _fake_ai()
+                        )
                     )
                     await asyncio.sleep(heartbeat_lease / 3 + 2.0)
                     mid_run_lease = _lease_until(document_id)
@@ -646,7 +670,7 @@ def test_delete_during_processing_persists_no_chunks(tmp_path: Path) -> None:
         async def run_against_stale_claim() -> str:
             async with _SessionFactory() as db:
                 outcome = await pipeline.process_claimed_document(
-                    db, storage, _SETTINGS, claimed
+                    db, storage, _SETTINGS, claimed, _fake_ai()
                 )
                 await db.rollback()
                 return outcome
@@ -655,5 +679,170 @@ def test_delete_during_processing_persists_no_chunks(tmp_path: Path) -> None:
 
         assert outcome == "stale"
         assert _chunk_rows(document_id) == []
+    finally:
+        _cleanup_document(document_id)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 (006): embedding step (quickstart VS-1, VS-4)
+# ---------------------------------------------------------------------------
+
+
+class _FailingAI:
+    """AI provider stub that raises AIProviderError with a fixed status."""
+
+    embedding_dims = 1024
+    embedding_model = "test-failing"
+
+    def __init__(self, status_code: int | None, message: str = "boom"):
+        self.status_code = status_code
+        self.message = message
+
+    async def embed(
+        self, texts: list[str], *, batch_size: int = 32
+    ) -> list[list[float]]:
+        raise AIProviderError(
+            self.message, provider="test-failing", status_code=self.status_code
+        )
+
+
+def test_embed_happy_path_fills_chunk_vectors(tmp_path: Path) -> None:
+    """US1: every chunk row carries a non-null 1024-dim vector when ready."""
+    document_id = uuid.uuid4()
+    storage_path = f"{USER_A}/docs/{document_id}.pdf"
+    storage = LocalStorageProvider(root=tmp_path)
+    data = make_pdf(["Alpha " * 115 + "page one", "Beta " * 115 + "page two"])
+    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
+
+    try:
+        outcome = asyncio.run(_run_pipeline(document_id, storage))
+        assert outcome == "ready"
+
+        row = _document_row(document_id)
+        assert row["status"] == "ready"  # lifecycle unchanged from Phase 4
+        assert row["total_chunks"] == 2
+
+        embeddings = _chunk_embeddings(document_id)
+        assert [e[0] for e in embeddings] == [0, 1]
+        for chunk_index, dims, embedding in embeddings:
+            assert dims == 1024, f"chunk {chunk_index} has wrong dims"
+            assert embedding is not None
+    finally:
+        _cleanup_document(document_id)
+
+
+def test_embed_auth_failure_fails_immediately(tmp_path: Path) -> None:
+    """US4: 401/403 from the provider is permanent → failed, no retry."""
+    document_id = uuid.uuid4()
+    storage_path = f"{USER_A}/docs/{document_id}.pdf"
+    storage = LocalStorageProvider(root=tmp_path)
+    data = make_pdf(["Embeddable content, then bad key."])
+    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
+
+    try:
+        async def run() -> str:
+            ai = _FailingAI(status_code=401)
+            async with _SessionFactory() as db:
+                claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
+                assert claimed is not None
+                await db.commit()
+            async with _SessionFactory() as db:
+                outcome = await pipeline.process_claimed_document(
+                    db, storage, _SETTINGS, claimed, ai
+                )
+                await db.commit()
+                return outcome
+
+        outcome = asyncio.run(run())
+        assert outcome == "failed"
+        row = _document_row(document_id)
+        assert row["status"] == "failed"
+        assert row["retry_count"] == 0  # permanent → no retries
+        assert "configuration error" in row["status_error"]
+        assert row["lease_until"] is None
+        assert _chunk_rows(document_id) == []
+        assert _chunk_embeddings(document_id) == []
+    finally:
+        _cleanup_document(document_id)
+
+
+def test_embed_transient_failure_retries_then_fails(tmp_path: Path) -> None:
+    """US4: 5xx embed failures follow the Phase 4 transient retry path."""
+    document_id = uuid.uuid4()
+    storage_path = f"{USER_A}/docs/{document_id}.pdf"
+    storage = LocalStorageProvider(root=tmp_path)
+    data = make_pdf(["Embeddable content, provider hiccup."])
+    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
+
+    try:
+        async def run_once(ai: AIProvider) -> str:
+            async with _SessionFactory() as db:
+                claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
+                assert claimed is not None
+                await db.commit()
+            async with _SessionFactory() as db:
+                outcome = await pipeline.process_claimed_document(
+                    db, storage, _SETTINGS, claimed, ai
+                )
+                await db.commit()
+                return outcome
+
+        ai = _FailingAI(status_code=500)
+        outcome = asyncio.run(run_once(ai))
+        assert outcome == "retry"
+        row = _document_row(document_id)
+        assert row["status"] == "uploaded"
+        assert row["retry_count"] == 1
+        assert "embedding failed" in row["status_error"]
+        assert row["lease_until"] is not None
+
+        _expire_lease(document_id)
+        assert asyncio.run(run_once(ai)) == "retry"
+        assert _document_row(document_id)["retry_count"] == 2
+
+        _expire_lease(document_id)
+        outcome = asyncio.run(run_once(ai))
+        assert outcome == "failed"
+        row = _document_row(document_id)
+        assert row["status"] == "failed"
+        assert row["retry_count"] == 3
+        assert row["status_error"]
+        assert row["lease_until"] is None
+        assert _chunk_rows(document_id) == []  # no half-written chunks
+    finally:
+        _cleanup_document(document_id)
+
+
+def test_embed_idempotent_ready_no_reprocess(tmp_path: Path) -> None:
+    """US1-AC4: an already-ready document is never re-claimed or re-embedded."""
+    document_id = uuid.uuid4()
+    storage_path = f"{USER_A}/docs/{document_id}.pdf"
+    storage = LocalStorageProvider(root=tmp_path)
+    data = make_pdf(["Idempotency check content."])
+    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
+
+    try:
+        assert asyncio.run(_run_pipeline(document_id, storage)) == "ready"
+        row = _document_row(document_id)
+        assert row["status"] == "ready"
+        assert row["retry_count"] == 0
+        embeddings_before = _chunk_embeddings(document_id)
+        assert embeddings_before  # chunks exist and carry vectors
+
+        async def poll() -> None:
+            async with _SessionFactory() as db:
+                claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
+                assert claimed is None  # claim pool excludes 'ready' (migration 0003)
+
+        asyncio.run(poll())
+
+        row = _document_row(document_id)
+        assert row["status"] == "ready"
+        assert row["retry_count"] == 0
+        assert _chunk_embeddings(document_id) == embeddings_before  # no re-embed
     finally:
         _cleanup_document(document_id)

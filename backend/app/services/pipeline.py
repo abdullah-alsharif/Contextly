@@ -1,12 +1,13 @@
-"""Document processing pipeline: claim → download → parse → chunk → persist.
+"""Document processing pipeline: claim → download → parse → chunk → embed → persist.
 
 One session per document (docs/ingestion.md §3, research.md R6). The claim is
 the single RLS-bypassing surface (worker_claim_next, SECURITY DEFINER); after
 claiming, this module switches the session transaction-locally to the runtime
-role + the document owner's claim, so every chunk INSERT and status UPDATE runs
-under the FORCE-RLS policies (docs/multi-tenancy.md §2/§3, contracts/worker.md
-§1). Failure classes per research.md R4: permanent ParseError → failed now;
-transient storage failures → deferred-lease retry, then failed.
+role + the document owner's claim, so every chunk INSERT (including vectors)
+and status UPDATE runs under the FORCE-RLS policies (docs/multi-tenancy.md
+§2/§3, contracts/worker.md §1). Failure classes per contracts/ai-provider.md
+§6: ParseError and embed 401/403 → permanent failed now; transient storage or
+embed failures → deferred-lease retry, then failed.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
+from app.providers.ai.base import AIProvider, AIProviderError
 from app.providers.storage.base import StorageError, StorageProvider
 from app.services.chunker import CHARS_PER_TOKEN, Chunk, ParseError, chunk_pages
 
@@ -38,8 +40,8 @@ _CLAIM = text("SELECT * FROM worker_claim_next(:lease_seconds)")
 _INSERT_CHUNK = text(
     """
     insert into document_chunks
-        (document_id, chunk_index, content, page_number, token_count, metadata)
-    values (:document_id, :chunk_index, :content, :page_number, :token_count, :metadata)
+        (document_id, chunk_index, content, page_number, token_count, metadata, embedding)
+    values (:document_id, :chunk_index, :content, :page_number, :token_count, :metadata, :embedding)
     """
 )
 
@@ -178,7 +180,12 @@ async def _fail_transient(
     return "failed"
 
 
-async def _persist(db: AsyncSession, claimed: ClaimedDocument, chunks: list[Chunk]) -> None:
+async def _persist(
+    db: AsyncSession,
+    claimed: ClaimedDocument,
+    chunks: list[Chunk],
+    embeddings: list[list[float]],
+) -> None:
     for index, chunk in enumerate(chunks):
         await db.execute(
             _INSERT_CHUNK,
@@ -189,6 +196,7 @@ async def _persist(db: AsyncSession, claimed: ClaimedDocument, chunks: list[Chun
                 "page_number": chunk.page_start,
                 "token_count": chunk.token_count,
                 "metadata": f'{{"page_start": {chunk.page_start}, "page_end": {chunk.page_end}}}',
+                "embedding": str(embeddings[index]),
             },
         )
     result = await db.execute(
@@ -203,11 +211,13 @@ async def process_claimed_document(
     storage: StorageProvider,
     settings: Settings,
     claimed: ClaimedDocument,
+    ai: AIProvider,
 ) -> Outcome:
     """Run one claimed document through the pipeline (contracts/worker.md §4–5).
 
-    Failure classes (research.md R4): ParseError is permanent → failed now;
-    StorageError and any unexpected exception (poison PDFs, provider bugs) are
+    Failure classes (contracts/ai-provider.md §6): ParseError and embed
+    401/403 are permanent → failed now; StorageError, other AIProviderError
+    statuses, and any unexpected exception (poison PDFs, provider bugs) are
     transient → deferred-lease retry that exhausts into failed after
     worker_max_retries. Unexpected exceptions never escape: the worker loop
     must survive arbitrary input (convergence finding F1).
@@ -241,8 +251,28 @@ async def process_claimed_document(
             return await _fail_permanent(db, claimed, message)
 
         try:
+            embeddings = await ai.embed(
+                [chunk.content for chunk in chunks],
+                batch_size=settings.embedding_batch_size,
+            )
+        except AIProviderError as exc:
+            if exc.status_code in (401, 403):
+                message = f"embedding configuration error: {exc}"
+                logger.warning(
+                    "doc %s permanent failure | class=permanent | %s", claimed.id, message
+                )
+                return await _fail_permanent(db, claimed, message)
+            message = f"embedding failed: {exc}"
+            logger.warning("doc %s transient failure | class=transient | %s", claimed.id, message)
+            return await _fail_transient(db, settings, claimed, message)
+        except Exception as exc:
+            message = f"embedding failed: {exc}"
+            logger.warning("doc %s transient failure | class=transient | %s", claimed.id, message)
+            return await _fail_transient(db, settings, claimed, message)
+
+        try:
             async with db.begin_nested():
-                await _persist(db, claimed, chunks)
+                await _persist(db, claimed, chunks, embeddings)
         except StaleClaimError:
             logger.warning("doc %s stale claim — rolling back persist", claimed.id)
             return "stale"
@@ -256,12 +286,13 @@ async def process_claimed_document(
         return await _fail_transient(db, settings, claimed, message)
 
     logger.info(
-        "doc %s done | stage=finalize | duration_ms=%.0f | page_count=%d | chunk_count=%d | total_tokens=%d",
+        "doc %s done | stage=finalize | duration_ms=%.0f | page_count=%d | chunk_count=%d | total_tokens=%d | embedding_model=%s",
         claimed.id,
         (perf_counter() - started) * 1000,
         len(pages),
         len(chunks),
         sum(chunk.token_count for chunk in chunks),
+        ai.embedding_model,
     )
     return "ready"
 

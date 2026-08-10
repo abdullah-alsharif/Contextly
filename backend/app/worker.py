@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.db.session import SessionFactory
+from app.providers.ai import build_ai_provider
+from app.providers.ai.base import AIProvider
 from app.providers.storage import build_storage_provider
 from app.providers.storage.base import StorageProvider
 from app.services import pipeline
@@ -47,7 +49,7 @@ async def _heartbeat(
 
 
 async def _process_one(
-    settings: Settings, storage: StorageProvider
+    settings: Settings, storage: StorageProvider, ai: AIProvider
 ) -> tuple[bool, pipeline.Outcome | None]:
     """Claim and process a single document. Returns (claimed, outcome)."""
     async with SessionFactory() as db:
@@ -65,7 +67,7 @@ async def _process_one(
     try:
         async with SessionFactory() as db:
             outcome = await pipeline.process_claimed_document(
-                db, storage, settings, claimed
+                db, storage, settings, claimed, ai
             )
             if outcome in ("ready", "failed", "retry"):
                 await db.commit()
@@ -89,15 +91,19 @@ async def _process_one(
 
 async def _run(settings: Settings) -> None:
     storage = build_storage_provider(settings)
+    ai = build_ai_provider(settings)
     logger.info(
-        "worker starting | ai_provider=%s storage_provider=%s poll_interval=%ss lease=%ss",
+        "worker starting | ai_provider=%s embedding_model=%s embedding_dims=%d "
+        "storage_provider=%s poll_interval=%ss lease=%ss",
         settings.ai_provider,
+        ai.embedding_model,
+        ai.embedding_dims,
         settings.storage_provider,
         settings.worker_poll_interval_seconds,
         settings.worker_lease_seconds,
     )
     while True:
-        claimed, outcome = await _process_one(settings, storage)
+        claimed, outcome = await _process_one(settings, storage, ai)
         if not claimed:
             await asyncio.sleep(settings.worker_poll_interval_seconds)
         elif outcome == "retry":

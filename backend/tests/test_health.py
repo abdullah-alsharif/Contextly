@@ -93,6 +93,9 @@ def test_healthz_real_database_probe() -> None:
     assert response.json()["checks"]["database"] is True
 
 
-def test_probe_ai_provider_fake_is_healthy() -> None:
+def test_probe_ai_provider_reflects_configurability() -> None:
+    # Provider construction is offline; health reflects "buildable with current config".
     assert probe_ai_provider(Settings(ai_provider="fake")) is True
-    assert probe_ai_provider(Settings(ai_provider="nvidia")) is False
+    assert probe_ai_provider(Settings(ai_provider="nvidia")) is True
+    assert probe_ai_provider(Settings(ai_provider="bogus")) is False
+    assert probe_ai_provider(Settings(ai_provider="fake", app_env="production")) is False

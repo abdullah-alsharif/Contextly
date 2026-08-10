@@ -16,6 +16,7 @@ from starlette.responses import Response
 
 from app.api import api_router
 from app.core.config import Settings, get_settings
+from app.providers.ai import build_ai_provider
 from app.providers.storage import build_storage_provider
 from app.providers.storage.base import StorageProvider
 
@@ -38,8 +39,12 @@ def probe_database(settings: Settings) -> bool:
 
 
 def probe_ai_provider(settings: Settings) -> bool:
-    """The fake provider is always healthy in dev."""
-    return settings.ai_provider == "fake"
+    """True when the configured provider can be built (fake is always healthy in dev)."""
+    try:
+        build_ai_provider(settings)
+        return True
+    except Exception:
+        return False
 
 
 def default_health_checks(settings: Settings) -> dict[str, HealthProbe]:
@@ -56,6 +61,7 @@ def create_app(
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_settings.validate_auth()
+    build_ai_provider(resolved_settings)  # fail fast on bad AI config (contracts/ai-provider.md §4)
     checks = (
         dict(health_checks) if health_checks is not None else default_health_checks(resolved_settings)
     )

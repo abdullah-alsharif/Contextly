@@ -418,12 +418,17 @@ def test_delete_purges_processed_chunks(client: TestClient) -> None:
             auth_mode="dev",
             app_env="dev",
         )
+        from app.providers.ai import build_ai_provider
+
+        ai = build_ai_provider(settings)
         async with _TestSessionFactory() as db:
             claimed = await pipeline.claim_next(db, lease_seconds=300)
             assert claimed is not None and claimed.id == document_id
             await db.commit()
         async with _TestSessionFactory() as db:
-            outcome = await pipeline.process_claimed_document(db, storage, settings, claimed)
+            outcome = await pipeline.process_claimed_document(
+                db, storage, settings, claimed, ai
+            )
             assert outcome == "ready"
             await db.commit()
 

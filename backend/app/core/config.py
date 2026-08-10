@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     # Chunking defaults (docs/ingestion.md §4.3, docs/rag.md §3).
     chunk_size_tokens: int = 500
     chunk_overlap_tokens: int = 50
+    # Embeddings (docs/rag.md §2, docs/ai-providers.md §2-4). The dimension MUST
+    # match the pgvector column and the provider's model output (validated at
+    # startup); keys are only needed for the nvidia/openrouter providers.
+    embedding_dim: int = 1024
+    embedding_batch_size: int = 32
+    ai_embed_retries: int = 3
+    ai_embed_retry_backoff_seconds: str = "1,2,4"
+    nvidia_api_key: str = ""
+    nvidia_embeddings_url: str = "https://integrate.api.nvidia.com/v1/embeddings"
+    openrouter_api_key: str = ""
+    openrouter_embeddings_url: str = "https://openrouter.ai/api/v1/embeddings"
 
     @field_validator("auth_mode")
     @classmethod
@@ -103,6 +114,14 @@ class Settings(BaseSettings):
         return [
             int(seconds.strip())
             for seconds in self.worker_retry_backoff_seconds.split(",")
+            if seconds.strip()
+        ]
+
+    @property
+    def ai_embed_retry_backoff_seconds_list(self) -> list[float]:
+        return [
+            float(seconds.strip())
+            for seconds in self.ai_embed_retry_backoff_seconds.split(",")
             if seconds.strip()
         ]
 
