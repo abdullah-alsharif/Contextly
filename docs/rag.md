@@ -37,7 +37,7 @@ select
   c.chunk_index,
   d.id   as document_id,
   d.filename,
-  1 - (c.embedding <=> :query_vec) as similarity
+  1 - (c.embedding <-> :query_vec) as similarity
 from document_chunks c
 join documents d on d.id = c.document_id
 where d.status = 'ready'
@@ -46,7 +46,7 @@ where d.status = 'ready'
       select cd.document_id from conversation_documents cd
       where cd.conversation_id = :conversation_id
   )
-order by c.embedding <=> :query_vec asc          -- L2; ascending = closest
+order by c.embedding <-> :query_vec asc          -- L2; ascending = closest
 limit :top_k;
 ```
 

@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # Chunking defaults (docs/ingestion.md §4.3, docs/rag.md §3).
     chunk_size_tokens: int = 500
     chunk_overlap_tokens: int = 50
+    # Retrieval defaults (docs/rag.md §2, docs/security.md §4). Top-K and HNSW
+    # search effort are operator-tunable (spec FR-005); the question length cap
+    # matches the documented 4000-char limit (docs/security.md §4).
+    retrieval_top_k: int = 6
+    retrieval_ef_search: int = 40
+    rag_query_max_chars: int = 4000
     # Embeddings (docs/rag.md §2, docs/ai-providers.md §2-4). The dimension MUST
     # match the pgvector column and the provider's model output (validated at
     # startup); keys are only needed for the nvidia/openrouter providers.

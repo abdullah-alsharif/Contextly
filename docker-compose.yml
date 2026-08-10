@@ -31,6 +31,9 @@ x-backend-env: &backend-env
   NVIDIA_EMBEDDINGS_URL: ${NVIDIA_EMBEDDINGS_URL:-https://integrate.api.nvidia.com/v1/embeddings}
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   OPENROUTER_EMBEDDINGS_URL: ${OPENROUTER_EMBEDDINGS_URL:-https://openrouter.ai/api/v1/embeddings}
+  RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-6}
+  RETRIEVAL_EF_SEARCH: ${RETRIEVAL_EF_SEARCH:-40}
+  RAG_QUERY_MAX_CHARS: ${RAG_QUERY_MAX_CHARS:-4000}
 
 services:
   db:

@@ -15,8 +15,10 @@ from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from app.api import api_router
+from app.api.rag import router as rag_router
 from app.core.config import Settings, get_settings
 from app.providers.ai import build_ai_provider
+from app.providers.ai.base import AIProvider
 from app.providers.storage import build_storage_provider
 from app.providers.storage.base import StorageProvider
 
@@ -58,10 +60,11 @@ def create_app(
     settings: Settings | None = None,
     health_checks: Mapping[str, HealthProbe] | None = None,
     storage_provider: StorageProvider | None = None,
+    ai_provider: AIProvider | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_settings.validate_auth()
-    build_ai_provider(resolved_settings)  # fail fast on bad AI config (contracts/ai-provider.md §4)
+    resolved_ai = ai_provider or build_ai_provider(resolved_settings)  # fail fast on bad AI config (contracts/ai-provider.md §4)
     checks = (
         dict(health_checks) if health_checks is not None else default_health_checks(resolved_settings)
     )
@@ -73,6 +76,7 @@ def create_app(
         redoc_url=None,
     )
     app.state.storage_provider = storage_provider or build_storage_provider(resolved_settings)
+    app.state.ai_provider = resolved_ai
 
     app.add_middleware(
         CORSMiddleware,
@@ -108,6 +112,8 @@ def create_app(
         )
 
     app.include_router(api_router)
+    if resolved_settings.app_env == "dev":
+        app.include_router(rag_router, prefix="/api/v1")
     return app
 
 
