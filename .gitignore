@@ -24,6 +24,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# Playwright artifacts
+test-results/
+playwright-report/
+
 # Env files (never commit local envs/secrets; example files stay tracked)
 .env
 .env*.local

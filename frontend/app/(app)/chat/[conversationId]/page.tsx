@@ -1,0 +1,163 @@
+"use client";
+
+// Chat workspace (docs/frontend-design.md §4; docs/chat.md §4–6): context
+// panel + streaming message list + sticky composer; citation chips open the
+// source viewer; AI Context Bar glows while pending (spec FR-014).
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
+import ChatComposer from "@/components/chat-composer";
+import ChatMessage from "@/components/chat-message";
+import ContextPanel from "@/components/context-panel";
+import EmptyState from "@/components/empty-state";
+import SourceViewer from "@/components/source-viewer";
+import type { Source } from "@/lib/api-client";
+import { useChat } from "@/lib/hooks/use-chat";
+import { useConversationDetail } from "@/lib/hooks/use-conversations";
+
+export default function ConversationPage() {
+  const params = useParams<{ conversationId: string }>();
+  const conversationId = params.conversationId;
+
+  const {
+    detail,
+    readyDocuments,
+    loading: conversationLoading,
+    error: conversationError,
+    setDocuments,
+  } = useConversationDetail(conversationId);
+  const { messages, loading: messagesLoading, streaming, error, send, retry, lastQuestion } =
+    useChat(conversationId);
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [activeSource, setActiveSource] = useState<Source | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Initialize selection from the conversation's persisted document set, and
+  // persist selection changes (PATCH replace, contract C3).
+  useEffect(() => {
+    if (detail) {
+      const current = detail.documents
+        .filter((doc) => doc.status === "ready")
+        .map((doc) => doc.id);
+      setSelectedIds(current);
+    }
+  }, [detail]);
+
+  const persistSelection = useCallback(
+    (ids: string[]) => {
+      setSelectedIds(ids);
+      if (detail && conversationId) {
+        // Fire-and-forget; the context panel stays responsive.
+        void setDocuments(ids);
+      }
+    },
+    [setDocuments, detail, conversationId],
+  );
+
+  const selectedDocuments = useMemo(
+    () => readyDocuments.filter((doc) => selectedIds.includes(doc.id)),
+    [readyDocuments, selectedIds],
+  );
+
+  // AI Context Bar state (spec FR-014).
+  useEffect(() => {
+    document
+      .getElementById("ai-context-bar")
+      ?.classList.toggle("active", streaming);
+    return () => document.getElementById("ai-context-bar")?.classList.remove("active");
+  }, [streaming]);
+
+  // Auto-scroll to live deltas, respecting user scroll position (stick to
+  // bottom only when already near it).
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const nearBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+    if (streaming ? nearBottom : true) {
+      container.scrollTop = container.scrollHeight;
+    }
+  });
+
+  const loading = conversationLoading || messagesLoading;
+
+  return (
+    <div className="flex h-full bg-surface-container-lowest">
+      <ContextPanel
+        readyDocuments={readyDocuments}
+        selectedIds={selectedIds}
+        setSelectedIds={persistSelection}
+      />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div ref={scrollRef} className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6">
+          {loading ? (
+            <EmptyState icon="hourglass_empty" title="Loading conversation…" />
+          ) : conversationError ? (
+            <div className="rounded-xl border border-error-container/40 bg-error-container/60 px-4 py-3 text-body-sm text-error" role="alert">
+              {conversationError}
+            </div>
+          ) : messages.length === 0 ? (
+            <EmptyState
+              icon="waving_hand"
+              title={selectedDocuments.length ? "Ask anything" : "Select documents on the left"}
+              hint={
+                selectedDocuments.length
+                  ? "Your question will be answered from the selected documents with cited sources."
+                  : "Pick at least one ready document to use as context, then ask your first question."
+              }
+            />
+          ) : (
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-stack-lg">
+              {messages.map((message) => (
+                <div key={message.localId}>
+                  <ChatMessage
+                    role={message.role}
+                    content={message.content}
+                    sources={message.sources ?? []}
+                    pending={message.pending}
+                    failed={message.failed}
+                    onCite={message.role === "assistant" ? setActiveSource : undefined}
+                  />
+                  {message.failed && message.role === "assistant" && (
+                    <div className="mt-1.5 flex items-center gap-2 pl-11">
+                      <p className="text-label-sm text-error">{message.error}</p>
+                      <button
+                        type="button"
+                        onClick={() => void retry()}
+                        disabled={streaming}
+                        className="rounded-lg bg-secondary px-3 py-1 font-display text-label-sm text-white transition-colors enabled:hover:bg-secondary-fixed-dim disabled:opacity-50"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {error && !streaming && (
+            <p className="mt-4 text-center text-label-sm text-error">{error}</p>
+          )}
+        </div>
+
+        <ChatComposer
+          selectedDocuments={selectedDocuments}
+          onRemoveDocument={(id) =>
+            persistSelection(selectedIds.filter((selected) => selected !== id))
+          }
+          onSend={(content) => void send(content)}
+          busy={streaming}
+        />
+      </div>
+
+      {activeSource && (
+        <SourceViewer
+          source={activeSource}
+          question={lastQuestion ?? undefined}
+          onClose={() => setActiveSource(null)}
+        />
+      )}
+    </div>
+  );
+}

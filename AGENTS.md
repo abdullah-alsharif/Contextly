@@ -56,5 +56,7 @@ make migrate   # apply infrastructure/migrations
 make test      # backend pytest
 ```
 
-Current task: **Phase 3** (document upload + storage) per `docs/roadmap.md` —
-spec/plan/tasks in `specs/004-document-upload-storage/`.
+Current task: **Phase 8** (frontend build-out) per `docs/roadmap.md` —
+spec/plan/tasks in `specs/009-frontend-buildout/`; implementation complete,
+smoke green via `npm run smoke` in `frontend/`. Two flagged backend
+touch-points are documented in `plan.md` (§ "Flagged backend touch-points").

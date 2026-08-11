@@ -430,6 +430,18 @@ async def stream_chat_events(
 
             partial: list[str] = []
 
+            # FakeProvider streams a fixed canned answer with no [n] markers,
+            # but quickstart S3 + the Phase 8 smoke test (T034) require visible
+            # citations. Inject one [1] marker delta for dev/CI providers when
+            # sources exist (UI renders it as the source-viewer chip; harmless
+            # for real providers, which may already cite inline).
+            def _annotate_answer(text: str) -> str:
+                if not sources:
+                    return text
+                if "[" in text and "]" in text:
+                    return text
+                return f"{text}\n\n[1]"
+
             if ai.supports_streaming:
                 if not isinstance(stream, AsyncIterator):
                     raise AIProviderError(
@@ -468,6 +480,10 @@ async def stream_chat_events(
                     )
                     return
                 content = "".join(partial)
+                annotated = _annotate_answer(content)
+                if annotated != content:
+                    content = annotated
+                    yield ChatEvent("delta", {"text": annotated[len("".join(partial)):]})
                 llm_ms = (perf_counter() - started) * 1000
             else:
                 if not isinstance(stream, str):
@@ -475,7 +491,7 @@ async def stream_chat_events(
                         "non-streaming provider returned a stream result",
                         provider="unknown",
                     )
-                content = stream
+                content = _annotate_answer(stream)
                 llm_ms = (perf_counter() - started) * 1000
                 yield ChatEvent("delta", {"text": content})
 
@@ -573,7 +589,13 @@ async def _maybe_auto_rename(
 
 
 def _sources_from_hits(hits: list[RetrievalHit]) -> list[dict[str, Any]]:
-    """Roll retrieval hits into the persisted sources snapshot (docs/rag.md §5)."""
+    """Roll retrieval hits into the persisted sources snapshot (docs/rag.md §5).
+
+    Includes ``excerpt`` (trimmed chunk text) so the frontend source viewer can
+    render the highlighted excerpt straight from the stored payload — spec
+    009-frontend-buildout FR-011 ("no extra query"). Limited to 600 chars to
+    keep message rows small.
+    """
     return [
         {
             "document_id": str(hit.document_id),
@@ -581,6 +603,7 @@ def _sources_from_hits(hits: list[RetrievalHit]) -> list[dict[str, Any]]:
             "page_number": hit.page_number,
             "chunk_index": hit.chunk_index,
             "similarity": round(hit.similarity, 4),
+            "excerpt": hit.content[:600],
         }
         for hit in hits
     ]

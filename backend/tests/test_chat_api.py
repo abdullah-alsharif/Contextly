@@ -432,7 +432,7 @@ def test_history_is_oldest_first_and_paginates(
     assert [row["content"] for row in page] == [
         "second question",
         'Answer for "second question": Based on your documents, the answer is '
-        "clear and can be cited from the retrieved excerpts.",
+        "clear and can be cited from the retrieved excerpts.\n\n[1]",
     ]  # newest messages first; within a page oldest first
     assert next_cursor is not None  # more pages exist
 
@@ -442,7 +442,7 @@ def test_history_is_oldest_first_and_paginates(
     assert [row["content"] for row in rest] == [
         "first question",
         'Answer for "first question": Based on your documents, the answer is '
-        "clear and can be cited from the retrieved excerpts.",
+        "clear and can be cited from the retrieved excerpts.\n\n[1]",
     ]
     assert next_cursor2 is None
 

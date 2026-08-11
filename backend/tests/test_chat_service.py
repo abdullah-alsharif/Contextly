@@ -296,7 +296,10 @@ async def test_stream_events_protocol_order_and_persistence():
         "Based on your documents, the answer is clear and can be cited from the "
         "retrieved excerpts."
     )
-    assert _accumulated(events) == expected + suffix
+    # Phase 8 flag: chat.py appends a [1] citation marker delta when sources
+    # exist so dev/CI chat exercises the citation UI (quickstart S3).
+    citation = "\n\n[1]"
+    assert _accumulated(events) == expected + suffix + citation
 
     done = events[-1].data
     assert uuid.UUID(done["id"])
@@ -316,7 +319,7 @@ async def test_stream_events_protocol_order_and_persistence():
         ).fetchone()
     assert row[0] == "assistant"
     assert row[1] == "done"
-    assert row[2] == expected + suffix
+    assert row[2] == expected + suffix + citation
 
 
 @pytest.mark.anyio
