@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     # limit is the documented in-process per-user bucket (30 req/min).
     chat_question_max_chars: int = 4000
     rate_limit_chat_per_minute: int = 30
+    # General (non-chat) API traffic: distinct per-user bucket (docs/security.md
+    # §5: "120 req/min general"; docs/deployment.md §3 `RATE_LIMIT_*` knobs).
+    rate_limit_general_per_minute: int = 120
+    # Download signed-URL TTL (docs/api.md §5 "5 min", docs/multi-tenancy.md §4).
+    storage_signed_url_ttl_seconds: int = 300
     history_page_size: int = 50
     auto_rename_title_max_chars: int = 60
 
@@ -73,6 +78,29 @@ class Settings(BaseSettings):
     def _validate_auth_mode(cls, value: str) -> str:
         if value not in ("dev", "supabase"):
             raise ValueError(f"auth_mode must be 'dev' or 'supabase', got {value!r}")
+        return value
+
+    @field_validator("rate_limit_chat_per_minute", "rate_limit_general_per_minute")
+    @classmethod
+    def _validate_rate_limits(cls, value: int) -> int:
+        # A non-positive budget would 429 every request (`len(hits) >= per_minute`
+        # is then always true) and silently brick the API — fail at startup.
+        if value <= 0:
+            raise ValueError(f"rate limit per minute must be > 0, got {value!r}")
+        return value
+
+    @field_validator("storage_signed_url_ttl_seconds")
+    @classmethod
+    def _validate_signed_url_ttl(cls, value: int) -> int:
+        # Short-lived by design (docs/security.md §3 "signed URLs 5 min"). The
+        # cap keeps `expires_at` truthful against the storage backend's token
+        # expiry (Supabase clamps at 604800s) so a misconfiguration can neither
+        # mint non-expiring URLs nor report a longer lifetime than the token.
+        if value <= 0 or value > 3600:
+            raise ValueError(
+                "storage_signed_url_ttl_seconds must be in 1..3600 "
+                f"(short expiry per docs/api.md §5), got {value!r}"
+            )
         return value
 
     @field_validator("cors_origins")

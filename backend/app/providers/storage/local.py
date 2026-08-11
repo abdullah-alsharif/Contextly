@@ -72,4 +72,9 @@ class LocalStorageProvider:
 
     async def signed_url(self, *, key: str, expires_in_seconds: int = 300) -> str:
         path = self._resolve(key, key.split("/", 1)[0])
+        # Dev/CI-only (docs/security.md §7): a file:// URI has no signing or
+        # expiry semantics — the `expires_in_seconds` parameter is accepted for
+        # interface compatibility and ignored. Production expiry enforcement is
+        # Supabase's signed token (`exp` validated server-side); the backends
+        # that honor it are the ones the API documents (docs/multi-tenancy.md §4).
         return path.as_uri()

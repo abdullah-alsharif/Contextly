@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.responses import Response
 
 from app.api import api_router
-from app.api.dependencies import ChatRateLimiter, InFlightRegistry
+from app.api.dependencies import InFlightRegistry, SlidingWindowRateLimiter
 from app.api.rag import router as rag_router
 from app.core.config import Settings, get_settings
 from app.db.session import SessionFactory
@@ -85,8 +85,11 @@ def create_app(
         resolved_settings
     )
     app.state.ai_provider = resolved_ai
-    app.state.chat_rate_limiter = ChatRateLimiter(
+    app.state.chat_rate_limiter = SlidingWindowRateLimiter(
         resolved_settings.rate_limit_chat_per_minute
+    )
+    app.state.general_rate_limiter = SlidingWindowRateLimiter(
+        resolved_settings.rate_limit_general_per_minute
     )
     app.state.chat_in_flight = InFlightRegistry()
     app.state.session_factory = session_factory or SessionFactory

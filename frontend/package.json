@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "security:check": "node scripts/check-security-headers.mjs",
     "smoke": "playwright test",
     "smoke:headed": "playwright test --headed",
     "smoke:install": "playwright install chromium"

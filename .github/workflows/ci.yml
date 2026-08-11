@@ -38,9 +38,28 @@ jobs:
       - name: Mypy check
         working-directory: backend
         run: mypy app
+      - name: Apply migrations
+        # DB-gated tests (and the Phase 9 matrix) need the schema; the CI
+        # Postgres service is fresh (docs/testing.md §1, docs/deployment.md §4).
+        # Run from the checkout root so `migrations_dir` (infrastructure/migrations)
+        # resolves, with PYTHONPATH exposing the `app` package.
+        run: PYTHONPATH=backend python -m app.migrate
       - name: Pytest
         working-directory: backend
         run: pytest -q
+      - name: Security matrix (must be 10/10)
+        # Phase 9 DoD (docs/roadmap.md, docs/testing.md §3): the tenant-isolation
+        # matrix collects exactly 10 tests and all pass — the count is a hard gate
+        # so the matrix can never silently shrink. Count by test-node lines
+        # (`::`), robust against pytest footer/warning text. The other security
+        # tests already ran in the `pytest -q` step above.
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          count=$(pytest tests/security/test_multi_tenancy_matrix.py --collect-only -q | grep -c '::')
+          echo "matrix tests collected: ${count}"
+          test "${count}" = "10"
+          pytest tests/security/test_multi_tenancy_matrix.py -q
 
   frontend:
     name: Frontend (tsc + eslint + next build)
@@ -61,6 +80,11 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npx eslint .
+      - name: Security headers
+        # Phase 9: CSP (+frame-ancestors), nosniff, X-Frame-Options verified
+        # against the actual next.config (docs/security.md §5, docs/deployment.md §5).
+        working-directory: frontend
+        run: npm run security:check
       - name: Build
         working-directory: frontend
         run: npx next build

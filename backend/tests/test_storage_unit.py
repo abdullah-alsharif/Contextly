@@ -241,3 +241,57 @@ def test_factory_rejects_unknown_provider() -> None:
     settings.storage_provider = "s3"
     with pytest.raises(ValueError, match="storage_provider"):
         build_storage_provider(settings)
+
+
+def test_supabase_transport_error_wrapped_as_storage_error() -> None:
+    """A raw httpx failure (no HTTP response) must cross the provider boundary
+    as StorageError so callers map it to 502, never a leaked 500."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("network is down", request=request)
+
+    provider = _supabase_provider(httpx.MockTransport(handler))
+
+    async def scenario() -> None:
+        with pytest.raises(StorageError):
+            await provider.upload(
+                key=KEY, data=b"%PDF-1.4", content_type="application/pdf"
+            )
+        with pytest.raises(StorageError):
+            await provider.signed_url(key=KEY, expires_in_seconds=300)
+
+    asyncio.run(scenario())
+
+
+def test_supabase_signed_url_non_json_body_wrapped() -> None:
+    """A 200 response with a non-JSON body must raise StorageError, not let a
+    JSONDecodeError escape the provider boundary."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"<html>not json</html>")
+
+    provider = _supabase_provider(httpx.MockTransport(handler))
+
+    async def scenario() -> None:
+        with pytest.raises(StorageError):
+            await provider.signed_url(key=KEY, expires_in_seconds=300)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("body", [b"[]", b"null", b"1", b"{}"])
+def test_supabase_signed_url_malformed_payload_wrapped(body: bytes) -> None:
+    """A 200 response whose JSON is not `{"signedURL": …}` must raise
+    StorageError (→ 502), never a raw AttributeError (→ 500) nor a tokenless
+    base URL passed off as a valid signed URL."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    provider = _supabase_provider(httpx.MockTransport(handler))
+
+    async def scenario() -> None:
+        with pytest.raises(StorageError):
+            await provider.signed_url(key=KEY, expires_in_seconds=300)
+
+    asyncio.run(scenario())

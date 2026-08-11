@@ -15,20 +15,23 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import enforce_general_rate_limit
 from app.core.config import Settings, get_settings
 from app.core.security.deps import get_current_user
 from app.core.security.identity import Identity
 from app.db.session import get_db
 from app.providers.storage.base import StorageProvider
-from app.schemas.document import DocumentOut
+from app.schemas.document import DocumentOut, DownloadUrlOut
 from app.services.documents import (
     DocumentNotFoundError,
     InvalidUploadError,
+    SignedUrlError,
     UploadFailedError,
     UploadTooLargeError,
     create_document,
     delete_document,
     get_document,
+    get_document_download_url,
     list_documents,
 )
 
@@ -37,7 +40,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/documents",
     tags=["documents"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_user), Depends(enforce_general_rate_limit)],
 )
 
 
@@ -114,6 +117,38 @@ async def get_document_detail(
         return await get_document(db, identity, document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{document_id}/download-url", response_model=DownloadUrlOut)
+async def get_download_url(
+    document_id: uuid.UUID,
+    identity: Identity = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    storage: StorageProvider = Depends(get_storage_provider),
+) -> dict[str, object]:
+    """Mint a short-lived signed download URL (docs/api.md §5).
+
+    Owner-only — a foreign/missing id behaves as 404 (docs/security.md §2
+    anti-enumeration) and the storage provider is never asked to sign it.
+    A storage signing failure maps to 502 without leaking the object path.
+    """
+    try:
+        url, expires_at = await get_document_download_url(
+            db,
+            storage,
+            identity,
+            document_id,
+            ttl_seconds=settings.storage_signed_url_ttl_seconds,
+        )
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SignedUrlError as exc:
+        logger.error("signed URL failed for user %s: %s", identity.user_id, exc)
+        raise HTTPException(
+            status_code=502, detail="file storage is unavailable"
+        ) from exc
+    return {"url": url, "expires_at": expires_at}
 
 
 @router.delete("/{document_id}", status_code=204)

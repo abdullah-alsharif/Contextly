@@ -64,40 +64,72 @@ class SupabaseStorageProvider:
                 f"{response.status_code} {response.text[:200]}"
             )
 
+    def _wrap_transport(self, operation: str, exc: Exception) -> StorageError:
+        """Normalize a raw httpx error into StorageError (provider contract).
+
+        httpx raises ConnectError/Timeout/etc. before any response exists, and
+        response.json() can raise for a 200-with-non-JSON body. Both must cross
+        the provider boundary as StorageError or callers (which only catch
+        StorageError and map it to 502) would leak a raw 500.
+        """
+        if isinstance(exc, StorageError):
+            return exc
+        return StorageError(f"supabase storage {operation} failed: {exc}")
+
     async def upload(self, *, key: str, data: bytes, content_type: str) -> None:
         validate_key(key, key.split("/", 1)[0])
-        response = await self._client.post(
-            self._object_url(key),
-            content=data,
-            headers={**self._auth_headers(), "Content-Type": content_type},
-        )
+        try:
+            response = await self._client.post(
+                self._object_url(key),
+                content=data,
+                headers={**self._auth_headers(), "Content-Type": content_type},
+            )
+        except httpx.HTTPError as exc:
+            raise self._wrap_transport("upload", exc) from exc
         self._raise_for_status(response, "upload")
 
     async def download(self, *, key: str) -> bytes:
         validate_key(key, key.split("/", 1)[0])
-        response = await self._client.get(
-            self._object_url(key), headers=self._auth_headers()
-        )
+        try:
+            response = await self._client.get(
+                self._object_url(key), headers=self._auth_headers()
+            )
+        except httpx.HTTPError as exc:
+            raise self._wrap_transport("download", exc) from exc
         self._raise_for_status(response, "download")
         return response.content
 
     async def delete(self, *, key: str) -> None:
         validate_key(key, key.split("/", 1)[0])
-        response = await self._client.delete(
-            self._object_url(key), headers=self._auth_headers()
-        )
+        try:
+            response = await self._client.delete(
+                self._object_url(key), headers=self._auth_headers()
+            )
+        except httpx.HTTPError as exc:
+            raise self._wrap_transport("delete", exc) from exc
         self._raise_for_status(response, "delete")
 
     async def signed_url(self, *, key: str, expires_in_seconds: int = 300) -> str:
         validate_key(key, key.split("/", 1)[0])
         expires = max(1, min(expires_in_seconds, _MAX_EXPIRY_SECONDS))
-        response = await self._client.post(
-            f"/object/sign/{self.bucket}/{key}",
-            json={"expiresIn": expires},
-            headers=self._auth_headers(),
-        )
-        self._raise_for_status(response, "sign")
-        signed_url: str = response.json().get("signedURL", "")
+        try:
+            response = await self._client.post(
+                f"/object/sign/{self.bucket}/{key}",
+                json={"expiresIn": expires},
+                headers=self._auth_headers(),
+            )
+            self._raise_for_status(response, "sign")
+            payload = response.json()  # JSONDecodeError is a ValueError → wrapped
+            # A signed response must be `{"signedURL": "…"}`; anything else is a
+            # malformed upstream (never a tokenless base URL passed off as a
+            # valid signed URL, and never an unhandled AttributeError → 500).
+            if not isinstance(payload, dict) or not payload.get("signedURL"):
+                raise StorageError(
+                    "supabase storage sign failed: response is missing signedURL"
+                )
+            signed_url: str = payload["signedURL"]
+        except (httpx.HTTPError, ValueError) as exc:
+            raise self._wrap_transport("sign", exc) from exc
         if signed_url.startswith("http"):
             return signed_url
         return f"{self._storage_base}{signed_url}"

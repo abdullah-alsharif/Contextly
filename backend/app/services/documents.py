@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 from logging import getLogger
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,10 @@ class UploadTooLargeError(Exception):
 
 class UploadFailedError(Exception):
     """Storage backend rejected the object (→ 502)."""
+
+
+class SignedUrlError(Exception):
+    """Storage backend refused to sign a download URL (→ 502, upstream)."""
 
 
 class DocumentNotFoundError(Exception):
@@ -220,6 +225,46 @@ async def delete_document(
             storage_path,
             exc,
         )
+
+
+async def get_document_download_url(
+    db: AsyncSession,
+    storage: StorageProvider,
+    identity: Identity,
+    document_id: uuid.UUID,
+    *,
+    ttl_seconds: int,
+) -> tuple[str, datetime]:
+    """Mint a short-lived signed URL for one of the caller's documents.
+
+    docs/api.md §5 (5 min), docs/multi-tenancy.md §4: objects are never public;
+    this returns a signed URL that expires quickly. Owner-only — a foreign or
+    missing id raises DocumentNotFoundError (404, docs/security.md §2
+    anti-enumeration), so a caller can never learn another tenant's object key.
+
+    Expiry is enforced by the storage backend that issues the token (Supabase
+    validates `exp` server-side); the local provider is dev/CI-only and does not
+    enforce expiry (documented risk, docs/security.md §7). `expires_at` is
+    computed from the provider's own notion where available; a signing failure
+    raises SignedUrlError (502) without leaking the storage path.
+    """
+    result = await db.execute(
+        _GET_DOCUMENT,
+        {"document_id": str(document_id), "user_id": str(identity.user_id)},
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise DocumentNotFoundError("document not found")
+    try:
+        url = await storage.signed_url(
+            key=row.storage_path, expires_in_seconds=ttl_seconds
+        )
+    except StorageError as exc:
+        raise SignedUrlError("signed URL issuance failed") from exc
+    # TTL is validated to a short, supra-provider-max-safe range (1..3600s,
+    # config.py), so expires_at is never longer than the issued token's lifetime.
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    return url, expires_at
 
 
 def _serialize(row: Any) -> dict[str, Any]:

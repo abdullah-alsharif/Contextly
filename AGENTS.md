@@ -56,7 +56,11 @@ make migrate   # apply infrastructure/migrations
 make test      # backend pytest
 ```
 
-Current task: **Phase 8** (frontend build-out) per `docs/roadmap.md` —
-spec/plan/tasks in `specs/009-frontend-buildout/`; implementation complete,
-smoke green via `npm run smoke` in `frontend/`. Two flagged backend
-touch-points are documented in `plan.md` (§ "Flagged backend touch-points").
+Current task: **Phase 9** (security hardening) per `docs/roadmap.md` —
+spec/plan/tasks in `specs/010-security-hardening/`. Adds the 10-test multi-tenancy
+matrix (`backend/tests/security/test_multi_tenancy_matrix.py`, CI-gated 10/10),
+general per-user rate limiting (120 req/min, distinct from chat's 30), the
+`GET /documents/{id}/download-url` signed-URL endpoint (5 min TTL), upload/guard-rail
+tests, frontend security headers (+frame-ancestors), and a migrate step so the CI
+Postgres gets the schema. No migrations/schema changes; phases 0–8 code is untouched
+except router-level rate-limit wiring and the new download-url endpoint.

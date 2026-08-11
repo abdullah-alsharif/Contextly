@@ -1,14 +1,15 @@
-"""Shared API dependencies: per-user chat rate limiting (docs/security.md §5).
+"""Shared API dependencies: per-user rate limiting (docs/security.md §5).
 
-The documented control is an in-process token bucket per user id
-(e.g. 30 req/min chat traffic) returning 429 with `Retry-After` on overflow
-(research R11). A sliding window keeps the burst behavior simple and
-dependency-free: a monotonically growing timestamp queue per user, pruned
-against a fixed window. Single-process by design — horizontal-scale
-rate limiting is explicitly out of MVP scope (docs/security.md §5).
+The documented control is an in-process sliding window per user id with
+distinct budgets per traffic class — chat (30 req/min) and general (120
+req/min) — returning 429 with `Retry-After` on overflow (research R11). A
+monotonically growing timestamp queue per user, pruned against a fixed window,
+keeps the burst behavior simple and dependency-free. Single-process by design —
+horizontal-scale rate limiting is explicitly out of MVP scope (docs/security.md
+§5, §7).
 
-The limiter instance lives on `app.state` (mirroring the AI/storage providers)
-so tests can inject a fresh or high-limit instance via `create_app`.
+Limiter instances live on `app.state` (mirroring the AI/storage providers) so
+tests can inject a fresh or high-limit instance via `create_app`.
 """
 
 from __future__ import annotations
@@ -32,8 +33,14 @@ class _Window:
     hits: deque[float] = field(default_factory=deque)
 
 
-class ChatRateLimiter:
-    """In-process sliding-window limiter keyed by user id (docs/security.md §5)."""
+class SlidingWindowRateLimiter:
+    """In-process sliding-window limiter keyed by user id (docs/security.md §5).
+
+    One instance per traffic class — chat (30 req/min) and general (120 req/min)
+    are distinct buckets that never count against each other (spec SC-002). A
+    request without a resolved identity is never recorded (the identity
+    dependency short-circuits with 401 first).
+    """
 
     def __init__(self, per_minute: int) -> None:
         self.per_minute = per_minute
@@ -56,21 +63,29 @@ class ChatRateLimiter:
     def _sweep(self, now: float) -> None:
         """Drop per-user windows that have gone idle (bounded memory).
 
-        Runs at most once per window: entries whose deque is empty (pruned by
-        the cutoff) are removed, so the map only holds users active within
-        the last window instead of growing without bound.
+        Runs at most once per window. A user is idle when their newest hit has
+        aged out of the window (or the deque is empty): such entries can never
+        affect a future decision, so the map only holds users active within
+        the last window instead of growing without bound — important because a
+        single request from an attacker-controlled user id would otherwise
+        accumulate a forever-stale entry.
         """
         if now - self._last_sweep < WINDOW_SECONDS:
             return
         self._last_sweep = now
-        idle = [user for user, window in self._windows.items() if not window.hits]
+        cutoff = now - WINDOW_SECONDS
+        idle = [
+            user
+            for user, window in self._windows.items()
+            if not window.hits or window.hits[-1] <= cutoff
+        ]
         for user in idle:
             del self._windows[user]
 
 
-def get_chat_rate_limiter(request: Request) -> ChatRateLimiter:
+def get_chat_rate_limiter(request: Request) -> SlidingWindowRateLimiter:
     """The app-scoped chat rate limiter (injectable in tests via create_app)."""
-    limiter: ChatRateLimiter = request.app.state.chat_rate_limiter
+    limiter: SlidingWindowRateLimiter = request.app.state.chat_rate_limiter
     return limiter
 
 
@@ -115,15 +130,42 @@ def get_in_flight_registry(request: Request) -> InFlightRegistry:
     return registry
 
 
-async def enforce_chat_rate_limit(
-    identity: Identity = Depends(get_current_user),
-    limiter: ChatRateLimiter = Depends(get_chat_rate_limiter),
-) -> None:
-    """Dependency: 429 with Retry-After when the user exceeds the chat limit."""
-    retry_after = limiter.check(str(identity.user_id))
+def _raise_if_rate_limited(retry_after: float | None, detail: str) -> None:
+    """Single 429 + Retry-After path shared by both budgets (docs/api.md §6)."""
     if retry_after is not None:
         raise HTTPException(
             status_code=429,
-            detail="chat rate limit exceeded, retry later",
+            detail=detail,
             headers={"Retry-After": str(max(1, int(retry_after)))},
         )
+
+
+async def enforce_chat_rate_limit(
+    identity: Identity = Depends(get_current_user),
+    limiter: SlidingWindowRateLimiter = Depends(get_chat_rate_limiter),
+) -> None:
+    """Dependency: 429 with Retry-After when the user exceeds the chat limit."""
+    _raise_if_rate_limited(
+        limiter.check(str(identity.user_id)), "chat rate limit exceeded, retry later"
+    )
+
+
+def get_general_rate_limiter(request: Request) -> SlidingWindowRateLimiter:
+    """The app-scoped general rate limiter (injectable in tests via create_app)."""
+    limiter: SlidingWindowRateLimiter = request.app.state.general_rate_limiter
+    return limiter
+
+
+async def enforce_general_rate_limit(
+    identity: Identity = Depends(get_current_user),
+    limiter: SlidingWindowRateLimiter = Depends(get_general_rate_limiter),
+) -> None:
+    """Dependency: 429 with Retry-After when the user exceeds the general limit.
+
+    Distinct from the chat budget (docs/security.md §5): wired at router level
+    on every non-chat /api/v1 router (spec D1) so chat and general buckets are
+    independent.
+    """
+    _raise_if_rate_limited(
+        limiter.check(str(identity.user_id)), "rate limit exceeded, retry later"
+    )

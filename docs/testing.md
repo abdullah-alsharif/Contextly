@@ -32,7 +32,7 @@ Two real users A and B, both with documents/conversations/messages. Assert `403/
 | 1 | `GET /documents/{B.doc}` | 404 |
 | 2 | `DELETE /documents/{B.doc}` | 404, B's row intact |
 | 3 | `GET /conversations/{B.conv}` | 404 |
-| 4 | `PATCH /conversations/{A.conv}` with `document_ids=[B.doc]` | 400, selection unchanged |
+| 4 | `PATCH /conversations/{A.conv}` with `document_ids=[B.doc]` | 404, selection unchanged |
 | 5 | `GET /conversations/{B.conv}/messages` | 404 |
 | 6 | `POST /conversations/{B.conv}/messages` | 404 |
 | 7 | Direct SQL: `select from document_chunks where document_id = B.doc` as A | 0 rows (RLS) |

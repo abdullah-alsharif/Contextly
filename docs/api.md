@@ -58,10 +58,10 @@ filename sanitized (strip path + control chars). Storage path is server-generate
 
 | Method | URL | Body | Response | Errors |
 |---|---|---|---|---|
-| POST | `/conversations` | `{ "title"?, "document_ids": [uuid] }` | `201 {conversation}` | 400 (bad doc id), 404 (doc not owned/ready), 401 |
+| POST | `/conversations` | `{ "title"?, "document_ids": [uuid] }` | `201 {conversation}` | 404 (bad or unowned doc id — deliberately ambiguous, anti-enumeration), 401 |
 | GET | `/conversations` | – | `200 [{conversation}]` (by `updated_at` desc) | 401 |
 | GET | `/conversations/{id}` | – | `200 {conversation, documents: [document]}` | 404 |
-| PATCH | `/conversations/{id}` | `{ "title"?, "document_ids"?: [uuid] }` | `200 {conversation}` | 404, 400, 422 |
+| PATCH | `/conversations/{id}` | `{ "title"?, "document_ids"?: [uuid] }` | `200 {conversation}` | 404, 422 |
 | DELETE | `/conversations/{id}` | – | `204` | 404 |
 
 PATCH semantics: full replace of `document_ids` when present (empty array = clear
@@ -115,6 +115,13 @@ Client sends `Idempotency-Key: <uuid>` on POST; backend dedupes the user message
 | Method | URL | Response | Notes |
 |---|---|---|---|
 | GET | `/documents/{id}/download-url` | `200 {url, expires_at}` | short-lived signed storage URL (5 min) |
+
+A download URL is issued only for an owned, non-deleted document regardless of
+processing status (mirrors `GET /documents/{id}`); a foreign/missing id returns
+404 and the storage provider is never asked to sign. `expires_at` is the short
+TTL (`STORAGE_SIGNED_URL_TTL_SECONDS`, validated 1‑3600s); expiry is **enforced
+by the storage backend** (Supabase token `exp`). The `local` provider is
+dev/CI-only and serves no expiry semantics (see `docs/security.md` §7).
 
 Explicitly, there is **no** static file-serving endpoint; signed URLs only.
 

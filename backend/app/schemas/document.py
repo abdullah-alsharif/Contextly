@@ -24,3 +24,10 @@ class DocumentOut(BaseModel):
     status_error: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class DownloadUrlOut(BaseModel):
+    """Short-lived signed storage URL (docs/api.md §5); owner-only issuance."""
+
+    url: str
+    expires_at: datetime
