@@ -4,6 +4,7 @@ No DB, no network: real HTTP providers are driven through httpx.MockTransport
 (research.md R7, quickstart VS-2/VS-3/VS-4/VS-5). Retry backoffs are overridden
 to zero in tests so the matrix stays fast.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -197,9 +198,7 @@ def test_nvidia_honors_retry_after_on_429() -> None:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            return httpx.Response(
-                429, headers={"Retry-After": "0"}, text="slow down"
-            )
+            return httpx.Response(429, headers={"Retry-After": "0"}, text="slow down")
         payload = json.loads(request.content)
         return httpx.Response(200, json=_ok_payload(payload["input"]))
 
@@ -293,10 +292,182 @@ def test_openrouter_sends_dimensions_1024() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("provider", [
-    FakeProvider(embedding_dims=1024),
-    NvidiaProvider(api_key="k", retries=2, backoff_seconds=NO_BACKOFF),
-    OpenRouterProvider(api_key="k", retries=2, backoff_seconds=NO_BACKOFF),
-])
+@pytest.mark.parametrize(
+    "provider",
+    [
+        FakeProvider(embedding_dims=1024),
+        NvidiaProvider(api_key="k", retries=2, backoff_seconds=NO_BACKOFF),
+        OpenRouterProvider(api_key="k", retries=2, backoff_seconds=NO_BACKOFF),
+    ],
+)
 def test_empty_input_is_a_noop(provider: AIProvider) -> None:
     assert asyncio.run(provider.embed([])) == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 chat surface: generate / streaming / count_tokens (research R4)
+# ---------------------------------------------------------------------------
+
+
+_MESSAGES = [
+    {"role": "system", "content": "system prompt"},
+    {"role": "user", "content": "What is the refund period?"},
+]
+
+
+def test_fake_generate_is_deterministic_and_offline() -> None:
+    provider = FakeProvider(embedding_dims=1024)
+    assert provider.supports_streaming is True
+    assert provider.chat_model == "fake-chat"
+    first = asyncio.run(provider.generate(_MESSAGES))
+    second = asyncio.run(provider.generate(_MESSAGES))
+    assert isinstance(first, str)
+    assert first == second  # deterministic canned answer
+    assert "What is the refund period?" in first
+
+
+def test_fake_streaming_deltas_accumulate_to_full_answer() -> None:
+    provider = FakeProvider(embedding_dims=1024)
+    stream = asyncio.run(provider.generate(_MESSAGES, stream=True))
+    assert not isinstance(stream, str)
+    collected = "".join(part for part in asyncio.run(_collect(stream)) if part)
+    full = asyncio.run(provider.generate(_MESSAGES))
+    assert isinstance(full, str)
+    assert collected == full
+
+
+async def _collect(iterator) -> list[str]:
+    return [part async for part in iterator]
+
+
+def test_fake_count_tokens_uses_shared_heuristic() -> None:
+    provider = FakeProvider(embedding_dims=1024)
+    text = "x" * 40
+    assert asyncio.run(provider.count_tokens(text)) == 10  # len // 4
+
+
+def _chat_payload(content: str) -> dict:
+    return {"choices": [{"message": {"role": "assistant", "content": content}}]}
+
+
+def test_nvidia_generate_non_stream_parses_content() -> None:
+    received: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        received["payload"] = json.loads(request.content)
+        received["url"] = str(request.url)
+        return httpx.Response(200, json=_chat_payload("The refund period is 30 days."))
+
+    provider = _nvidia_provider(handler)
+    answer = asyncio.run(provider.generate(_MESSAGES))
+    assert answer == "The refund period is 30 days."
+    assert received["url"] == "https://integrate.api.nvidia.com/v1/chat/completions"
+    assert received["payload"] == {
+        "model": "nvidia/llama-3.1-nemotron-70b-instruct",
+        "messages": _MESSAGES,
+        "stream": False,
+    }
+
+
+def _stream_ok_handler() -> Handler:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = (
+            'data: {"choices":[{"delta":{"content":"The "}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"refund"}}]}\n\n'
+            'data: {"choices":[{"delta":{}}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(
+            200, text=body, headers={"Content-Type": "text/event-stream"}
+        )
+
+    return handler
+
+
+def test_nvidia_generate_stream_accumulates_deltas() -> None:
+    provider = _nvidia_provider(_stream_ok_handler())
+    stream = asyncio.run(provider.generate(_MESSAGES, stream=True))
+    assert not isinstance(stream, str)
+    parts = asyncio.run(_collect(stream))
+    assert parts == ["The ", "refund"]
+    assert "".join(parts) == "The refund"
+
+
+def test_nvidia_stream_surfaces_vendor_error_chunk() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = 'data: {"error": {"message": "upstream failure"}}\n\n'
+        return httpx.Response(200, text=body)
+
+    provider = _nvidia_provider(handler)
+    stream = asyncio.run(provider.generate(_MESSAGES, stream=True))
+    assert not isinstance(stream, str)
+    with pytest.raises(AIProviderError, match="upstream failure"):
+        asyncio.run(_collect(stream))
+
+
+def test_nvidia_stream_rejects_http_status_before_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    provider = _nvidia_provider(handler)
+    stream = asyncio.run(provider.generate(_MESSAGES, stream=True))
+    assert not isinstance(stream, str)
+    with pytest.raises(AIProviderError) as excinfo:
+        asyncio.run(_collect(stream))
+    assert excinfo.value.status_code == 500
+
+
+def test_nvidia_chat_retries_5xx_then_surfaces_error() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503, text="overloaded")
+
+    provider = _nvidia_provider(handler)
+    with pytest.raises(AIProviderError) as excinfo:
+        asyncio.run(provider.generate(_MESSAGES))
+    assert attempts == 3  # initial + 2 retries (nvidia retries=2)
+    assert excinfo.value.status_code == 503
+
+
+def test_nvidia_chat_does_not_retry_401() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(401, text="bad key")
+
+    provider = _nvidia_provider(handler)
+    with pytest.raises(AIProviderError) as excinfo:
+        asyncio.run(provider.generate(_MESSAGES))
+    assert attempts == 1  # configuration error → never retried
+    assert excinfo.value.status_code == 401
+
+
+def test_openrouter_chat_request_shape() -> None:
+    received: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        received["payload"] = json.loads(request.content)
+        received["url"] = str(request.url)
+        return httpx.Response(200, json=_chat_payload("ok"))
+
+    provider = OpenRouterProvider(
+        api_key="or-key",
+        retries=2,
+        backoff_seconds=NO_BACKOFF,
+        transport=httpx.MockTransport(handler),
+    )
+    answer = asyncio.run(provider.generate(_MESSAGES))
+    assert answer == "ok"
+    assert received["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert received["payload"] == {
+        "model": "openai/gpt-4o-mini",
+        "messages": _MESSAGES,
+        "stream": False,
+    }
+    assert provider.supports_streaming is True
+    assert asyncio.run(provider.count_tokens("x" * 40)) == 10

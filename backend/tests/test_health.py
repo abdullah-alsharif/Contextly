@@ -2,6 +2,7 @@
 
 Health probes are dependency-injected so failure paths are deterministic.
 """
+
 import os
 
 import pytest
@@ -98,4 +99,6 @@ def test_probe_ai_provider_reflects_configurability() -> None:
     assert probe_ai_provider(Settings(ai_provider="fake")) is True
     assert probe_ai_provider(Settings(ai_provider="nvidia")) is True
     assert probe_ai_provider(Settings(ai_provider="bogus")) is False
-    assert probe_ai_provider(Settings(ai_provider="fake", app_env="production")) is False
+    assert (
+        probe_ai_provider(Settings(ai_provider="fake", app_env="production")) is False
+    )

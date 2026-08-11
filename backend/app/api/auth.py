@@ -3,6 +3,7 @@
 Only the `me` endpoint exists in FastAPI this phase — login/register/logout are
 proxied by the frontend server to Supabase (docs/api.md §1 footnote, Phase 8).
 """
+
 from __future__ import annotations
 
 

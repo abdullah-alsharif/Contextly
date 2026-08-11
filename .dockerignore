@@ -1,0 +1,9 @@
+node_modules/
+.git/
+.gitignore
+*.log*
+.env*
+coverage/
+__pycache__/
+.venv/
+*.pyc

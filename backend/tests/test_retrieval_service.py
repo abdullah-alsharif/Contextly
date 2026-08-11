@@ -13,6 +13,7 @@ query vector, so L2 distances and `1 - distance` similarities are exact and
 assertable. The fake provider's determinism is irrelevant here because we
 control both sides of the distance.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -90,8 +91,7 @@ def _seed_user(user_id: uuid.UUID) -> None:
     with _admin() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "insert into auth.users (id) values (%s) "
-                "on conflict (id) do nothing",
+                "insert into auth.users (id) values (%s) on conflict (id) do nothing",
                 (user_id,),
             )
             cur.execute(
@@ -369,9 +369,13 @@ def test_unselected_ready_documents_are_excluded() -> None:
         _seed_document(unselected, USER_A)
         _seed_conversation(conversation_id, USER_A)
         _link(conversation_id, selected)
-        _seed_chunk(uuid.uuid4(), selected, index=0, content="selected", vector=_vec(0.1))
+        _seed_chunk(
+            uuid.uuid4(), selected, index=0, content="selected", vector=_vec(0.1)
+        )
         # An exact query match in a ready-but-unselected document must be invisible.
-        _seed_chunk(uuid.uuid4(), unselected, index=0, content="unselected", vector=_vec(1.0))
+        _seed_chunk(
+            uuid.uuid4(), unselected, index=0, content="unselected", vector=_vec(1.0)
+        )
 
         hits = asyncio.run(
             _search(
@@ -397,7 +401,9 @@ def test_not_ready_documents_are_excluded() -> None:
         _seed_document(ready, USER_A)
         _seed_conversation(conversation_id, USER_A)
         _link(conversation_id, ready)
-        _seed_chunk(uuid.uuid4(), ready, index=0, content="ready chunk", vector=_vec(0.1))
+        _seed_chunk(
+            uuid.uuid4(), ready, index=0, content="ready chunk", vector=_vec(0.1)
+        )
         for index, status in enumerate(("uploaded", "processing", "failed")):
             other = uuid.uuid4()
             _seed_document(other, USER_A, status=status)
@@ -504,7 +510,9 @@ def test_empty_when_linked_documents_are_not_ready() -> None:
         _seed_document(doc_id, USER_A, status="processing")
         _seed_conversation(conversation_id, USER_A)
         _link(conversation_id, doc_id)
-        _seed_chunk(uuid.uuid4(), doc_id, index=0, content="not ready", vector=_vec(1.0))
+        _seed_chunk(
+            uuid.uuid4(), doc_id, index=0, content="not ready", vector=_vec(1.0)
+        )
 
         hits = asyncio.run(
             _search(
@@ -532,7 +540,9 @@ def test_empty_is_scope_driven_not_similarity_driven(
         _seed_document(doc_id, USER_A)
         _seed_conversation(conversation_id, USER_A)
         _link(conversation_id, doc_id)
-        _seed_chunk(uuid.uuid4(), doc_id, index=0, content="only chunk", vector=_vec(0.0))
+        _seed_chunk(
+            uuid.uuid4(), doc_id, index=0, content="only chunk", vector=_vec(0.0)
+        )
 
         with caplog.at_level(logging.INFO, logger="app.services.retrieval"):
             hits = asyncio.run(

@@ -10,6 +10,7 @@ Upload order (research.md R3): validate → insert row → upload object → 201
 An upload failure rolls the row back (get_db rolls back on exception).
 Delete order (research.md R4): owned-row lookup → soft-delete → remove object.
 """
+
 from __future__ import annotations
 
 import re
@@ -76,9 +77,7 @@ _SOFT_DELETE = text(
     """
 )
 
-_PURGE_CHUNKS = text(
-    "delete from document_chunks where document_id = :document_id"
-)
+_PURGE_CHUNKS = text("delete from document_chunks where document_id = :document_id")
 
 
 class InvalidUploadError(Exception):

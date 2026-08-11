@@ -5,6 +5,7 @@ keypair + injected PyJWKSet (contracts/auth.md §2 allows an injected resolver).
 Matrix: absent/malformed/expired/wrong-signature/wrong-audience/wrong-issuer/
 valid dev/valid prod HS256/valid prod RS256.
 """
+
 from __future__ import annotations
 
 import time
@@ -102,9 +103,7 @@ def test_supabase_hs256_valid() -> None:
 
 def test_supabase_hs256_expired_rejected() -> None:
     with pytest.raises(AuthError):
-        _supabase_hs256().authenticate(
-            _supabase_hs256_token(expires_in_seconds=-3600)
-        )
+        _supabase_hs256().authenticate(_supabase_hs256_token(expires_in_seconds=-3600))
 
 
 def test_supabase_hs256_wrong_signature_rejected() -> None:
@@ -224,6 +223,7 @@ def test_supabase_rs256_wrong_signature_rejected(rsa_pem: tuple[str, str]) -> No
 
 # --- get_current_user dependency (no DB) -----------------------------------
 
+
 def _run(agen):
     """Exhaust an async generator to its yielded value (no pytest-asyncio)."""
 
@@ -254,7 +254,9 @@ def test_get_current_user_bad_scheme_401() -> None:
     with pytest.raises(Exception) as exc_info:
         _run(
             get_current_user(
-                credentials=HTTPAuthorizationCredentials(scheme="Basic", credentials="x"),
+                credentials=HTTPAuthorizationCredentials(
+                    scheme="Basic", credentials="x"
+                ),
                 db=object(),
                 settings=Settings(),
             )
@@ -274,7 +276,9 @@ def test_get_current_user_emits_rls_statements() -> None:
             self.statements: list[str] = []
             self.params: list[dict] = []
 
-        async def execute(self, statement: object, params: dict | None = None) -> FakeResult:
+        async def execute(
+            self, statement: object, params: dict | None = None
+        ) -> FakeResult:
             self.statements.append(str(statement))
             self.params.append(params or {})
             return FakeResult()
@@ -287,14 +291,18 @@ def test_get_current_user_emits_rls_statements() -> None:
     token = dev_token(SUB_A, secret=DEV_SECRET)
     identity = _run(
         get_current_user(
-            credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials=token),
+            credentials=HTTPAuthorizationCredentials(
+                scheme="Bearer", credentials=token
+            ),
             db=session,
             settings=Settings(),
         )
     )
 
     assert identity is not None and identity.user_id == SUB_A
-    assert any("SET LOCAL ROLE" in s and "contextly_app" in s for s in session.statements)
+    assert any(
+        "SET LOCAL ROLE" in s and "contextly_app" in s for s in session.statements
+    )
     assert session.params and session.params[1]["sub"] == str(SUB_A)
 
 

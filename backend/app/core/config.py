@@ -54,8 +54,19 @@ class Settings(BaseSettings):
     ai_embed_retry_backoff_seconds: str = "1,2,4"
     nvidia_api_key: str = ""
     nvidia_embeddings_url: str = "https://integrate.api.nvidia.com/v1/embeddings"
+    nvidia_chat_url: str = "https://integrate.api.nvidia.com/v1/chat/completions"
+    nvidia_chat_model: str = "nvidia/llama-3.1-nemotron-70b-instruct"
     openrouter_api_key: str = ""
     openrouter_embeddings_url: str = "https://openrouter.ai/api/v1/embeddings"
+    openrouter_chat_url: str = "https://openrouter.ai/api/v1/chat/completions"
+    openrouter_chat_model: str = "openai/gpt-4o-mini"
+    # Chat (Phase 7; docs/chat.md §6, docs/security.md §4-5, research R15).
+    # The question cap follows the documented 4000-char limit; the chat rate
+    # limit is the documented in-process per-user bucket (30 req/min).
+    chat_question_max_chars: int = 4000
+    rate_limit_chat_per_minute: int = 30
+    history_page_size: int = 50
+    auto_rename_title_max_chars: int = 60
 
     @field_validator("auth_mode")
     @classmethod
@@ -72,9 +83,7 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [
-            origin.strip()
-            for origin in self.cors_origins.split(",")
-            if origin.strip()
+            origin.strip() for origin in self.cors_origins.split(",") if origin.strip()
         ]
 
     def validate_auth(self) -> None:

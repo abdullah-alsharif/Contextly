@@ -4,6 +4,7 @@ make_pdf builds a valid single-page-per-entry PDF with a correct xref table from
 plain text lines, so worker tests need no binary fixtures and can craft exact
 page content. Also ships corrupt and no-text helpers.
 """
+
 from __future__ import annotations
 
 
@@ -24,8 +25,7 @@ def _build_pdf(objects: list[bytes], *, root: int = 1) -> bytes:
     for offset in offsets:
         out += f"{offset:010d} 00000 n \r\n".encode()
     out += (
-        f"trailer\n<< /Size {count} /Root {root} 0 R >>\n"
-        f"startxref\n{xref_pos}\n%%EOF"
+        f"trailer\n<< /Size {count} /Root {root} 0 R >>\nstartxref\n{xref_pos}\n%%EOF"
     ).encode()
     return bytes(out)
 
@@ -46,7 +46,11 @@ def make_pdf(pages: list[str]) -> bytes:
         next_index += 2
         stream = f"BT /F1 12 Tf 72 720 Td ({_escape_pdf_string(text)}) Tj ET".encode()
         content_body = (
-            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"
+            b"<< /Length "
+            + str(len(stream)).encode()
+            + b" >>\nstream\n"
+            + stream
+            + b"\nendstream"
         )
         page_body = (
             f"<< /Type /Page /Parent {pages_index} 0 R /MediaBox [0 0 612 792] "
@@ -84,7 +88,11 @@ def make_poison_pdf() -> bytes:
     """
     stream = b"BT /F1 12 Tf 72 720 Td (hi) Tj ET"
     content_body = (
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"
+        b"<< /Length "
+        + str(len(stream)).encode()
+        + b" >>\nstream\n"
+        + stream
+        + b"\nendstream"
     )
     page_body = (
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "

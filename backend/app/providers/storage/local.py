@@ -4,6 +4,7 @@ Zero credentials, no network (docs/local-dev.md §storage, contracts/storage.md 
 Keys are tenant-prefixed ({user_id}/…, docs/multi-tenancy.md §4) and validated
 through the shared validate_key before any I/O.
 """
+
 from __future__ import annotations
 
 import asyncio

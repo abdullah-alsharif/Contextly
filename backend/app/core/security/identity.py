@@ -1,4 +1,5 @@
 """Identity resolved from an authenticated request (contracts/auth.md)."""
+
 from __future__ import annotations
 
 import uuid

@@ -10,6 +10,7 @@ Flow (contracts/auth.md §1, §4):
    bypasses the database boundary.
 5. Bootstrap the user's `profiles` row if missing (docs/security.md §1).
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -30,6 +31,20 @@ from app.services.profiles import ensure_profile
 _bearer = HTTPBearer(auto_error=False)
 
 RLS_ROLE = "contextly_app"
+
+
+async def apply_identity_to_session(db: AsyncSession, identity: Identity) -> None:
+    """Switch a DB session to the NOBYPASSRLS app role + the user's claim.
+
+    Transaction-local (docs/multi-tenancy.md §2): both are discarded on the
+    session's next commit/rollback, so every query that should be RLS-scoped
+    must run inside the same transaction that applied them.
+    """
+    await db.execute(text(f"SET LOCAL ROLE {RLS_ROLE}"))
+    await db.execute(
+        text("SELECT set_config('request.jwt.claim.sub', :sub, true)"),
+        {"sub": str(identity.user_id)},
+    )
 
 
 def build_authenticator(settings: Settings) -> Authenticator:
@@ -61,7 +76,11 @@ async def get_current_user(
     settings: Settings = Depends(get_settings),
 ) -> AsyncIterator[Identity]:
     """Resolve the authenticated identity, or raise 401 (contracts/auth.md §1)."""
-    if credentials is None or credentials.scheme.lower() != "bearer" or not credentials.credentials:
+    if (
+        credentials is None
+        or credentials.scheme.lower() != "bearer"
+        or not credentials.credentials
+    ):
         raise _unauthorized("missing bearer token")
 
     try:
@@ -70,11 +89,7 @@ async def get_current_user(
         raise _unauthorized(str(exc)) from exc
 
     # Identity → RLS propagation (transaction-local, resets on commit/rollback).
-    await db.execute(text(f"SET LOCAL ROLE {RLS_ROLE}"))
-    await db.execute(
-        text("SELECT set_config('request.jwt.claim.sub', :sub, true)"),
-        {"sub": str(identity.user_id)},
-    )
+    await apply_identity_to_session(db, identity)
 
     # Bootstrap the profile row on first sight (docs/security.md §1).
     await ensure_profile(db, identity)

@@ -6,6 +6,7 @@ Runs inside the request's RLS session (role + claim already set by
 get_current_user), so the profiles_user_isolation policy passes
 (docs/multi-tenancy.md §2).
 """
+
 from __future__ import annotations
 
 from typing import Any

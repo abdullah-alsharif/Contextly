@@ -5,6 +5,7 @@ unauthenticated requests get 401 by construction (contracts/auth.md §1). Error
 mapping: 400 invalid upload, 413 oversized, 404 not owned/nonexistent/deleted,
 502 upstream storage failure (docs/api.md §2, §6).
 """
+
 from __future__ import annotations
 
 import logging
@@ -93,7 +94,8 @@ async def upload_document(
 
 @router.get("", response_model=list[DocumentOut])
 async def get_documents(
-    status: Literal["uploaded", "processing", "ready", "failed", "deleted"] | None = None,
+    status: Literal["uploaded", "processing", "ready", "failed", "deleted"]
+    | None = None,
     identity: Identity = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, object]]:

@@ -6,6 +6,7 @@ workers safe if one is ever added. Each document gets its own DB session
 (research.md R6); a background heartbeat re-arms the claim lease every
 min(lease_seconds/3, 30)s so slow parses aren't re-claimed (contracts §3).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -61,7 +62,9 @@ async def _process_one(
         await db.commit()
 
     started = perf_counter()
-    logger.info("doc %s claimed | stage=claim | retry_count=%d", claimed.id, claimed.retry_count)
+    logger.info(
+        "doc %s claimed | stage=claim | retry_count=%d", claimed.id, claimed.retry_count
+    )
     stop = asyncio.Event()
     heartbeat = asyncio.create_task(_heartbeat(settings, claimed, stop))
     try:

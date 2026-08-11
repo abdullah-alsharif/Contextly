@@ -4,6 +4,7 @@ Connects via DATABASE_URL, ensures a schema_migrations ledger, applies unapplied
 files matching ^(\\d+)_.*\\.sql$ in ascending numeric order — each in its own
 transaction — and no-ops cleanly when the directory is empty (research.md D4).
 """
+
 import logging
 import re
 from pathlib import Path

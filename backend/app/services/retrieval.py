@@ -10,6 +10,7 @@ set by get_current_user — the database stays the enforced boundary
 Pre-LLM only: this module never calls a generation service (docs/roadmap.md
 Phase 6-7); it returns chunks, not answers.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -89,15 +90,11 @@ async def _embed_question(ai: AIProvider, question: str) -> list[float]:
         except AIProviderError as exc:
             if attempt == 0 and exc.status_code not in (401, 403):
                 continue
-            raise QuestionEmbeddingError(
-                f"question embedding failed: {exc}"
-            ) from exc
+            raise QuestionEmbeddingError(f"question embedding failed: {exc}") from exc
         except Exception as exc:  # noqa: BLE001 - provider boundary: never leak
             if attempt == 0:
                 continue
-            raise QuestionEmbeddingError(
-                f"question embedding failed: {exc}"
-            ) from exc
+            raise QuestionEmbeddingError(f"question embedding failed: {exc}") from exc
     raise AssertionError("unreachable")  # pragma: no cover
 
 

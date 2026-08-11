@@ -4,7 +4,7 @@ Business routes land under /api/v1 in later phases (docs/api.md); health is
 infrastructure and stays at root (contracts/healthz.md, research.md D3). Auth
 configuration is validated at startup (fails loudly on unsafe modes).
 """
-import logging
+
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 
@@ -12,17 +12,18 @@ import psycopg
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.responses import Response
 
 from app.api import api_router
+from app.api.dependencies import ChatRateLimiter, InFlightRegistry
 from app.api.rag import router as rag_router
 from app.core.config import Settings, get_settings
+from app.db.session import SessionFactory
 from app.providers.ai import build_ai_provider
 from app.providers.ai.base import AIProvider
 from app.providers.storage import build_storage_provider
 from app.providers.storage.base import StorageProvider
-
-logger = logging.getLogger(__name__)
 
 SERVICE_NAME = "contextly-backend"
 VERSION = "0.1.0"
@@ -61,12 +62,17 @@ def create_app(
     health_checks: Mapping[str, HealthProbe] | None = None,
     storage_provider: StorageProvider | None = None,
     ai_provider: AIProvider | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_settings.validate_auth()
-    resolved_ai = ai_provider or build_ai_provider(resolved_settings)  # fail fast on bad AI config (contracts/ai-provider.md §4)
+    resolved_ai = ai_provider or build_ai_provider(
+        resolved_settings
+    )  # fail fast on bad AI config (contracts/ai-provider.md §4)
     checks = (
-        dict(health_checks) if health_checks is not None else default_health_checks(resolved_settings)
+        dict(health_checks)
+        if health_checks is not None
+        else default_health_checks(resolved_settings)
     )
 
     app = FastAPI(
@@ -75,8 +81,15 @@ def create_app(
         docs_url=None,
         redoc_url=None,
     )
-    app.state.storage_provider = storage_provider or build_storage_provider(resolved_settings)
+    app.state.storage_provider = storage_provider or build_storage_provider(
+        resolved_settings
+    )
     app.state.ai_provider = resolved_ai
+    app.state.chat_rate_limiter = ChatRateLimiter(
+        resolved_settings.rate_limit_chat_per_minute
+    )
+    app.state.chat_in_flight = InFlightRegistry()
+    app.state.session_factory = session_factory or SessionFactory
 
     app.add_middleware(
         CORSMiddleware,

@@ -10,6 +10,7 @@ Startup validation (contracts/ai-provider.md §4, research.md R4):
 - AI_PROVIDER=fake is only ever allowed in a dev environment (mirrors the
   AUTH_MODE=dev guard in config.py::validate_auth).
 """
+
 from __future__ import annotations
 
 from app.core.config import Settings
@@ -39,6 +40,8 @@ def build_ai_provider(settings: Settings) -> AIProvider:
         provider = NvidiaProvider(
             api_key=settings.nvidia_api_key,
             base_url=settings.nvidia_embeddings_url,
+            chat_url=settings.nvidia_chat_url,
+            chat_model=settings.nvidia_chat_model,
             retries=settings.ai_embed_retries,
             backoff_seconds=backoff,
         )
@@ -46,6 +49,8 @@ def build_ai_provider(settings: Settings) -> AIProvider:
         provider = OpenRouterProvider(
             api_key=settings.openrouter_api_key,
             base_url=settings.openrouter_embeddings_url,
+            chat_url=settings.openrouter_chat_url,
+            chat_model=settings.openrouter_chat_model,
             retries=settings.ai_embed_retries,
             backoff_seconds=backoff,
         )

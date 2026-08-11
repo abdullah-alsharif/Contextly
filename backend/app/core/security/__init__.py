@@ -3,6 +3,7 @@
 Exports the pieces every other module needs: `Identity`, `get_current_user`,
 and the `dev_token` helper for local tools/tests.
 """
+
 from app.core.security.base import AuthError, Authenticator
 from app.core.security.deps import get_current_user
 from app.core.security.dev import DEV_AUDIENCE, DevAuthenticator, dev_token

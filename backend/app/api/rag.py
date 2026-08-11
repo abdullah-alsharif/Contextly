@@ -8,6 +8,7 @@ Error mapping: 404 conversation not found/not owned/deleted (docs/security.md
 §2 anti-enumeration), 422 body validation (docs/api.md §6), 502 question
 embedding failure after retries (docs/rag.md §7).
 """
+
 from __future__ import annotations
 
 import logging
@@ -61,8 +62,7 @@ async def query_rag(
         raise HTTPException(
             status_code=422,
             detail=(
-                "question must be at most "
-                f"{settings.rag_query_max_chars} characters"
+                f"question must be at most {settings.rag_query_max_chars} characters"
             ),
         )
     started = perf_counter()
@@ -79,9 +79,7 @@ async def query_rag(
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except QuestionEmbeddingError as exc:
-        logger.error(
-            "question embedding failed for user %s: %s", identity.user_id, exc
-        )
+        logger.error("question embedding failed for user %s: %s", identity.user_id, exc)
         raise HTTPException(
             status_code=502, detail="question embedding is unavailable"
         ) from exc

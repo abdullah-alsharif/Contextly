@@ -8,6 +8,7 @@ POST /object/{bucket}/{key}, download GET, delete DELETE (single-key form),
 signed URL POST /object/sign/{bucket}/{key} (relative response must be
 prefixed with the storage base URL).
 """
+
 from __future__ import annotations
 
 import httpx
@@ -74,13 +75,17 @@ class SupabaseStorageProvider:
 
     async def download(self, *, key: str) -> bytes:
         validate_key(key, key.split("/", 1)[0])
-        response = await self._client.get(self._object_url(key), headers=self._auth_headers())
+        response = await self._client.get(
+            self._object_url(key), headers=self._auth_headers()
+        )
         self._raise_for_status(response, "download")
         return response.content
 
     async def delete(self, *, key: str) -> None:
         validate_key(key, key.split("/", 1)[0])
-        response = await self._client.delete(self._object_url(key), headers=self._auth_headers())
+        response = await self._client.delete(
+            self._object_url(key), headers=self._auth_headers()
+        )
         self._raise_for_status(response, "delete")
 
     async def signed_url(self, *, key: str, expires_in_seconds: int = 300) -> str:

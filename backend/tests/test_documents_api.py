@@ -5,6 +5,7 @@ Covers contracts/documents.md — upload validation matrix (201/400/413/401/502)
 list/detail isolation (200/404/422), delete semantics (204/404), cross-tenant
 404s with owner data intact. Storage is the local provider rooted in a tmp dir.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -119,9 +120,7 @@ def cleanup() -> None:
             cur.execute(
                 "delete from documents where user_id in (%s, %s)", (USER_A, USER_B)
             )
-            cur.execute(
-                "delete from profiles where id in (%s, %s)", (USER_A, USER_B)
-            )
+            cur.execute("delete from profiles where id in (%s, %s)", (USER_A, USER_B))
         conn.commit()
 
 
@@ -272,7 +271,8 @@ def test_list_status_filter(client: TestClient) -> None:
     token = _token(USER_A)
     _upload(client, token)
     response = client.get(
-        "/api/v1/documents?status=uploaded", headers={"Authorization": f"Bearer {token}"}
+        "/api/v1/documents?status=uploaded",
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
     assert all(doc["status"] == "uploaded" for doc in response.json())
@@ -280,7 +280,8 @@ def test_list_status_filter(client: TestClient) -> None:
 
 def test_list_invalid_status_422(client: TestClient) -> None:
     response = client.get(
-        "/api/v1/documents?status=banana", headers={"Authorization": f"Bearer {_token(USER_A)}"}
+        "/api/v1/documents?status=banana",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
     )
     assert response.status_code == 422
 
@@ -303,14 +304,16 @@ def test_detail_cross_tenant_404(client: TestClient) -> None:
     token_a, token_b = _token(USER_A), _token(USER_B)
     _, doc_a = _upload(client, token_a)
     response = client.get(
-        f"/api/v1/documents/{doc_a['id']}", headers={"Authorization": f"Bearer {token_b}"}
+        f"/api/v1/documents/{doc_a['id']}",
+        headers={"Authorization": f"Bearer {token_b}"},
     )
     assert response.status_code == 404
 
 
 def test_detail_nonexistent_404(client: TestClient) -> None:
     response = client.get(
-        f"/api/v1/documents/{uuid.uuid4()}", headers={"Authorization": f"Bearer {_token(USER_A)}"}
+        f"/api/v1/documents/{uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
     )
     assert response.status_code == 404
 
@@ -353,7 +356,9 @@ def test_delete_own_document_204(client: TestClient) -> None:
 def test_delete_again_404(client: TestClient) -> None:
     token = _token(USER_A)
     _, doc = _upload(client, token)
-    client.delete(f"/api/v1/documents/{doc['id']}", headers={"Authorization": f"Bearer {token}"})
+    client.delete(
+        f"/api/v1/documents/{doc['id']}", headers={"Authorization": f"Bearer {token}"}
+    )
     response = client.delete(
         f"/api/v1/documents/{doc['id']}", headers={"Authorization": f"Bearer {token}"}
     )
@@ -364,7 +369,8 @@ def test_delete_cross_tenant_404_owner_intact(client: TestClient) -> None:
     token_a, token_b = _token(USER_A), _token(USER_B)
     _, doc_a = _upload(client, token_a)
     response = client.delete(
-        f"/api/v1/documents/{doc_a['id']}", headers={"Authorization": f"Bearer {token_b}"}
+        f"/api/v1/documents/{doc_a['id']}",
+        headers={"Authorization": f"Bearer {token_b}"},
     )
     assert response.status_code == 404
 
@@ -381,7 +387,8 @@ def test_delete_cross_tenant_404_owner_intact(client: TestClient) -> None:
 
 def test_delete_nonexistent_404(client: TestClient) -> None:
     response = client.delete(
-        f"/api/v1/documents/{uuid.uuid4()}", headers={"Authorization": f"Bearer {_token(USER_A)}"}
+        f"/api/v1/documents/{uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
     )
     assert response.status_code == 404
 
@@ -407,7 +414,9 @@ def test_delete_purges_processed_chunks(client: TestClient) -> None:
             )
         conn.commit()
 
-    status, doc = _upload(client, _token(USER_A), content=make_pdf(["Deletable content"]))
+    status, doc = _upload(
+        client, _token(USER_A), content=make_pdf(["Deletable content"])
+    )
     assert status == 201
     document_id = uuid.UUID(doc["id"])
 

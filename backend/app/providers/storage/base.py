@@ -5,6 +5,7 @@ docs/ai-providers.md §3. Every key is tenant-prefixed ({user_id}/…, docs/
 multi-tenancy.md §4); both implementations MUST validate keys through the shared
 validate_key helper — the provider boundary enforces the rule, never the caller.
 """
+
 from __future__ import annotations
 
 import re

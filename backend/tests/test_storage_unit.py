@@ -5,6 +5,7 @@ provider roundtrip, and the Supabase provider REST surface via httpx
 MockTransport (endpoints, headers, relative signed-URL prefixing).
 Async scenarios run with asyncio.run — same pattern as tests/test_auth_api.py.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -51,7 +52,9 @@ def test_local_roundtrip_upload_download_delete(tmp_path: Path) -> None:
     key = f"{USER}/docs/{uuid.uuid4()}.pdf"
 
     async def scenario() -> None:
-        await provider.upload(key=key, data=b"%PDF-1.4 test", content_type="application/pdf")
+        await provider.upload(
+            key=key, data=b"%PDF-1.4 test", content_type="application/pdf"
+        )
         assert await provider.download(key=key) == b"%PDF-1.4 test"
         object_path = tmp_path / key
         assert object_path.is_file()
@@ -169,9 +172,7 @@ def test_supabase_delete_single_key() -> None:
 
 
 def test_supabase_signed_url_prefixes_relative_path() -> None:
-    transport = _SupabaseTransport(
-        signed_url_path="/object/sign/documents/x?token=abc"
-    )
+    transport = _SupabaseTransport(signed_url_path="/object/sign/documents/x?token=abc")
     provider = _supabase_provider(transport)
 
     async def scenario() -> str:
@@ -179,8 +180,7 @@ def test_supabase_signed_url_prefixes_relative_path() -> None:
 
     url = asyncio.run(scenario())
     assert (
-        url
-        == "https://proj.supabase.co/storage/v1/object/sign/documents/x?token=abc"
+        url == "https://proj.supabase.co/storage/v1/object/sign/documents/x?token=abc"
     )
     request = transport.last_request
     assert request is not None

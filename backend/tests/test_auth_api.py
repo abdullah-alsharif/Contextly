@@ -5,6 +5,7 @@ Covers contracts/auth.md §6: /api/v1/auth/me with dev tokens — provisioning o
 first sight (idempotent), 401 matrix (missing/malformed/expired/wrong-secret/
 wrong-audience), healthz stays open, WWW-Authenticate header present.
 """
+
 from __future__ import annotations
 
 import os
@@ -68,7 +69,9 @@ def test_auth_me_provisions_profile_on_first_call(
     client: TestClient, cleanup: None
 ) -> None:
     token = dev_token(SUB, secret=DEV_SECRET, email="api-test@dev.contextly.local")
-    response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == str(SUB)
@@ -144,7 +147,9 @@ def test_auth_me_rls_isolation_through_request_session(client: TestClient) -> No
                 )
             )
             try:
-                async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                async with async_sessionmaker(
+                    engine, expire_on_commit=False
+                )() as session:
                     credentials = HTTPAuthorizationCredentials(
                         scheme="Bearer", credentials=token_a
                     )

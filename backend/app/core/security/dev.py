@@ -6,6 +6,7 @@ get_current_user path is identical in both modes (docs/local-dev.md §3,
 constitution VI). The startup guard (config.validate_auth) makes this mode
 impossible outside a dev environment.
 """
+
 from __future__ import annotations
 
 import time
@@ -42,7 +43,11 @@ def dev_token(
 class DevAuthenticator:
     """Accept HS256 JWTs signed with the well-known dev secret."""
 
-    def __init__(self, secret: str = "contextly-dev-secret-0123456789abcdef", leeway_seconds: int = 30) -> None:
+    def __init__(
+        self,
+        secret: str = "contextly-dev-secret-0123456789abcdef",
+        leeway_seconds: int = 30,
+    ) -> None:
         self._secret = secret
         self._leeway = leeway_seconds
 

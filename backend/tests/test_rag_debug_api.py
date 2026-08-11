@@ -8,6 +8,7 @@ after retries. The query vector is injected via a fixed-vector AIProvider
 (create_app(ai_provider=...)) so ranking assertions are exact; the fake
 provider's end-to-end embedding path is exercised in the service tests.
 """
+
 from __future__ import annotations
 
 import os
@@ -133,14 +134,15 @@ def _seed_user(conn: psycopg.Connection, user: uuid.UUID) -> None:
             (user,),
         )
         cur.execute(
-            "insert into profiles (id, email) values (%s, %s) "
-            "on conflict do nothing",
+            "insert into profiles (id, email) values (%s, %s) on conflict do nothing",
             (user, f"{user}@example.com"),
         )
     conn.commit()
 
 
-def _seed_conversation(conn: psycopg.Connection, conv: uuid.UUID, user: uuid.UUID) -> None:
+def _seed_conversation(
+    conn: psycopg.Connection, conv: uuid.UUID, user: uuid.UUID
+) -> None:
     with conn.cursor() as cur:
         cur.execute(
             "insert into conversations (id, user_id, title) values (%s, %s, %s) "
@@ -217,7 +219,9 @@ def cleanup_after() -> None:
             cur.execute("delete from conversation_documents")
             cur.execute("delete from conversations")
             cur.execute("delete from document_chunks")
-            cur.execute("delete from documents where user_id in (%s, %s)", (USER_A, USER_B))
+            cur.execute(
+                "delete from documents where user_id in (%s, %s)", (USER_A, USER_B)
+            )
             cur.execute("delete from profiles where id in (%s, %s)", (USER_A, USER_B))
         conn.commit()
 
@@ -264,7 +268,9 @@ def test_happy_path_returns_ranked_hits_with_metadata(
     assert hits[0]["content"] == "chunk-1 content"
 
 
-def test_top_k_override_limits_hits(client: TestClient, seeded: tuple[uuid.UUID, uuid.UUID]) -> None:
+def test_top_k_override_limits_hits(
+    client: TestClient, seeded: tuple[uuid.UUID, uuid.UUID]
+) -> None:
     conv, _ = seeded
     status, body = _query(client, _token(USER_A), conv, top_k=2)
     assert status == 200
@@ -287,7 +293,9 @@ def test_empty_scope_returns_empty_hits(client: TestClient) -> None:
             conn.commit()
 
 
-def test_unowned_conversation_404(client: TestClient, seeded: tuple[uuid.UUID, uuid.UUID]) -> None:
+def test_unowned_conversation_404(
+    client: TestClient, seeded: tuple[uuid.UUID, uuid.UUID]
+) -> None:
     conv, _ = seeded
     status, body = _query(client, _token(USER_B), conv)
     assert status == 404
@@ -319,7 +327,9 @@ def test_deleted_conversation_404(client: TestClient) -> None:
             conn.commit()
 
 
-def test_question_validation_422(client: TestClient, seeded: tuple[uuid.UUID, uuid.UUID]) -> None:
+def test_question_validation_422(
+    client: TestClient, seeded: tuple[uuid.UUID, uuid.UUID]
+) -> None:
     conv, _ = seeded
     token = _token(USER_A)
     cases = [
@@ -392,7 +402,9 @@ def test_rag_endpoint_present_in_dev(client: TestClient) -> None:
     assert response.status_code in (200, 404, 422)
 
 
-def test_rag_endpoint_absent_outside_dev(tmp_path_factory: pytest.TempPathFactory) -> None:
+def test_rag_endpoint_absent_outside_dev(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
     prod_settings = Settings(
         database_url=os.environ["DATABASE_URL"],
         auth_mode="supabase",

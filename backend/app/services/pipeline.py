@@ -9,6 +9,7 @@ and status UPDATE runs under the FORCE-RLS policies (docs/multi-tenancy.md
 §6: ParseError and embed 401/403 → permanent failed now; transient storage or
 embed failures → deferred-lease retry, then failed.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -145,10 +146,10 @@ async def _switch_to_owner(db: AsyncSession, claimed: ClaimedDocument) -> None:
     )
 
 
-async def _fail_permanent(db: AsyncSession, claimed: ClaimedDocument, message: str) -> Outcome:
-    await db.execute(
-        _FAIL_PERMANENT, {"id": str(claimed.id), "message": message}
-    )
+async def _fail_permanent(
+    db: AsyncSession, claimed: ClaimedDocument, message: str
+) -> Outcome:
+    await db.execute(_FAIL_PERMANENT, {"id": str(claimed.id), "message": message})
     return "failed"
 
 
@@ -229,14 +230,18 @@ async def process_claimed_document(
             data = await storage.download(key=claimed.storage_path)
         except StorageError as exc:
             message = f"storage read failed: {exc}"
-            logger.warning("doc %s transient failure | class=transient | %s", claimed.id, message)
+            logger.warning(
+                "doc %s transient failure | class=transient | %s", claimed.id, message
+            )
             return await _fail_transient(db, settings, claimed, message)
 
         try:
             pages = await asyncio.to_thread(parse_pdf, data)
         except ParseError as exc:
             message = str(exc)
-            logger.warning("doc %s permanent failure | class=permanent | %s", claimed.id, message)
+            logger.warning(
+                "doc %s permanent failure | class=permanent | %s", claimed.id, message
+            )
             return await _fail_permanent(db, claimed, message)
 
         try:
@@ -247,7 +252,9 @@ async def process_claimed_document(
             )
         except ParseError as exc:
             message = str(exc)
-            logger.warning("doc %s permanent failure | class=permanent | %s", claimed.id, message)
+            logger.warning(
+                "doc %s permanent failure | class=permanent | %s", claimed.id, message
+            )
             return await _fail_permanent(db, claimed, message)
 
         try:
@@ -259,15 +266,21 @@ async def process_claimed_document(
             if exc.status_code in (401, 403):
                 message = f"embedding configuration error: {exc}"
                 logger.warning(
-                    "doc %s permanent failure | class=permanent | %s", claimed.id, message
+                    "doc %s permanent failure | class=permanent | %s",
+                    claimed.id,
+                    message,
                 )
                 return await _fail_permanent(db, claimed, message)
             message = f"embedding failed: {exc}"
-            logger.warning("doc %s transient failure | class=transient | %s", claimed.id, message)
+            logger.warning(
+                "doc %s transient failure | class=transient | %s", claimed.id, message
+            )
             return await _fail_transient(db, settings, claimed, message)
         except Exception as exc:
             message = f"embedding failed: {exc}"
-            logger.warning("doc %s transient failure | class=transient | %s", claimed.id, message)
+            logger.warning(
+                "doc %s transient failure | class=transient | %s", claimed.id, message
+            )
             return await _fail_transient(db, settings, claimed, message)
 
         try:
@@ -297,7 +310,9 @@ async def process_claimed_document(
     return "ready"
 
 
-async def rearm_lease(db: AsyncSession, claimed: ClaimedDocument, lease_seconds: int) -> None:
+async def rearm_lease(
+    db: AsyncSession, claimed: ClaimedDocument, lease_seconds: int
+) -> None:
     """Heartbeat: extend the claim's lease under the owner's RLS session (contracts §3)."""
     await _switch_to_owner(db, claimed)
     await db.execute(

@@ -1,4 +1,5 @@
 """Pydantic schemas for documents (contracts/documents.md §3, docs/api.md §2)."""
+
 from __future__ import annotations
 
 import uuid

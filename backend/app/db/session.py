@@ -2,6 +2,7 @@
 
 Contracts: specs/002-database-schema/contracts/database.md §4.
 """
+
 from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker

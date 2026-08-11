@@ -4,6 +4,7 @@ STORAGE_PROVIDER=local → LocalStorageProvider (zero credentials, dev/tests);
 STORAGE_PROVIDER=supabase → SupabaseStorageProvider (production). Unknown
 values fail loudly at startup (contracts/storage.md §4, mirrors auth mode).
 """
+
 from __future__ import annotations
 
 from app.core.config import Settings

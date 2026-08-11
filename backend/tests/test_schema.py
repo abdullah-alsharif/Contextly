@@ -3,8 +3,10 @@
 Requires the Phase 1 migration to be applied (make migrate) and a reachable
 DATABASE_URL; skipped otherwise (same pattern as test_health.py).
 """
+
 import asyncio
 import os
+import uuid
 
 import psycopg
 import pytest
@@ -12,6 +14,8 @@ from sqlalchemy import text
 
 from app.db.engine import engine
 from app.db.session import get_db
+from app.schemas.conversation import ConversationIn, MAX_DOCUMENT_IDS, MAX_TITLE_CHARS
+from app.schemas.message import MessageSendIn, MAX_CONTENT_CHARS
 
 EXPECTED_TABLES = {
     "profiles",
@@ -224,3 +228,46 @@ def _dispose_engine_after_test() -> None:
     (each asyncio.run() above closes its loop)."""
     yield
     asyncio.run(engine.dispose())
+
+
+# ---------------------------------------------------------------------------
+# Request schema validation (T025, contracts/chat.md §5)
+# ---------------------------------------------------------------------------
+
+
+def test_message_send_in_trims_whitespace() -> None:
+    assert MessageSendIn(content="   what is the refund period?  ").content == (
+        "what is the refund period?"
+    )
+
+
+def test_message_send_in_rejects_blank_or_missing_content() -> None:
+    for bad in ("", "   ", "\t\n"):
+        with pytest.raises(ValueError):
+            MessageSendIn(content=bad)
+
+
+def test_message_send_in_structural_bound() -> None:
+    assert len(MessageSendIn(content="x" * MAX_CONTENT_CHARS).content) == (
+        MAX_CONTENT_CHARS
+    )
+    with pytest.raises(ValueError):
+        MessageSendIn(content="x" * (MAX_CONTENT_CHARS + 1))
+
+
+def test_conversation_in_title_rules() -> None:
+    assert ConversationIn(title="  Job applications  ").title == "Job applications"
+    assert ConversationIn().title is None
+    for bad in ("", "   ", "x" * (MAX_TITLE_CHARS + 1)):
+        with pytest.raises(ValueError):
+            ConversationIn(title=bad)
+
+
+def test_conversation_in_document_ids_rules() -> None:
+    ids = [str(uuid.uuid4()) for _ in range(MAX_DOCUMENT_IDS)]
+    assert len(ConversationIn(document_ids=ids).document_ids or []) == MAX_DOCUMENT_IDS
+    assert ConversationIn(document_ids=[]).document_ids == []
+    with pytest.raises(ValueError):
+        ConversationIn(document_ids=ids + [str(uuid.uuid4())])
+    with pytest.raises(ValueError):
+        ConversationIn(document_ids=["not-a-uuid"])

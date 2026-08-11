@@ -6,6 +6,7 @@ CHARS_PER_TOKEN ≈ 2.4 turns the token targets from docs/ingestion.md §4.3
 pages unless a single page cannot hold a full chunk — page alignment is what
 Phase 6 retrieval cites (page_number, docs/rag.md §5).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

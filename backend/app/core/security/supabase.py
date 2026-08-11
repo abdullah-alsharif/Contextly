@@ -9,6 +9,7 @@ Supabase projects may still issue legacy HS256 tokens alongside RS256 (key
 migration state, research.md §2); the resolver inspects the token header and
 picks the right key: HS256 → shared secret, RS256 → JWKS by `kid`.
 """
+
 from __future__ import annotations
 
 import base64

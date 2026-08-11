@@ -6,6 +6,7 @@ runtime role with A's identity claim must see only A's rows everywhere, reject
 cross-owner writes, and fail closed with no claim. Skipped when DATABASE_URL is
 unreachable (same pattern as test_health.py).
 """
+
 import os
 import uuid
 
@@ -238,5 +239,73 @@ def test_rls_fails_closed_without_claim(rows: FixtureRows) -> None:
             for table in TABLES:
                 cur.execute(f"select count(*) from {table}")
                 assert cur.fetchone()[0] == 0, table
+    finally:
+        conn.close()
+
+
+def test_rls_blocks_cross_tenant_conversation_writes(rows: FixtureRows) -> None:
+    """Phase 7 matrix: conversations/messages writes are tenant-scoped at RLS.
+
+    specs/008-chat-conversations SC-003 — no test can construct a message,
+    selection, or conversation observable by a user other than the owner.
+
+    Each attempt runs on a fresh role-switched connection: the runtime role
+    + claim are session-level, and a psycopg rollback reverts them to the
+    admin session (which bypasses RLS), so one shared connection would make
+    later attempts bypass the boundary.
+    """
+    # UPDATE/DELETE on another user's rows are silently filtered (USING).
+    conn = _as_role(rows, str(rows.user_a))
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update conversations set title = 'hijacked' where id = %s",
+                (rows.conv_b,),
+            )
+            assert cur.rowcount == 0
+            cur.execute(
+                "delete from conversations where id = %s",
+                (rows.conv_b,),
+            )
+            assert cur.rowcount == 0
+            conn.rollback()
+    finally:
+        conn.close()
+
+    attempts = [
+        (
+            "insert into conversations (id, user_id, title) values (%s, %s, 'sneaky')",
+            (uuid.uuid4(), rows.user_b),
+        ),
+        (
+            "insert into messages (conversation_id, role, content) "
+            "values (%s, 'user', 'sneaky')",
+            (rows.conv_b,),
+        ),
+        (
+            "insert into conversation_documents (conversation_id, document_id) "
+            "values (%s, %s)",
+            (rows.conv_b, rows.doc_b),
+        ),
+    ]
+    for sql, params in attempts:
+        conn = _as_role(rows, str(rows.user_a))
+        try:
+            with conn.cursor() as cur:
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    cur.execute(sql, params)
+        finally:
+            conn.close()
+
+    # ...but the caller's own conversation accepts the caller's document.
+    conn = _as_role(rows, str(rows.user_a))
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into conversation_documents (conversation_id, document_id) "
+                "values (%s, %s) on conflict do nothing",
+                (rows.conv_a, rows.doc_a),
+            )
+            conn.commit()
     finally:
         conn.close()

@@ -1,4 +1,5 @@
 """Pydantic schemas for profiles (contracts/auth.md §6)."""
+
 from __future__ import annotations
 
 import uuid

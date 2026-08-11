@@ -3,6 +3,7 @@
 One thin module per constitution IV: replacing the vendor (or using dev mode)
 must not require changes outside this package plus configuration.
 """
+
 from __future__ import annotations
 
 from typing import Protocol

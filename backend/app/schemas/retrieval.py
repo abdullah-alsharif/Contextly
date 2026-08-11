@@ -6,6 +6,7 @@ docs/api.md §2/§6 (422 on validation, stable error shape) and docs/security.md
 inspection; the Phase 7 message surface will use the leaner sources shape
 (docs/rag.md §5).
 """
+
 from __future__ import annotations
 
 import uuid

@@ -4,6 +4,7 @@ page attribution, empty-text handling; research.md R3). No database required.
 Defaults mirror docs/ingestion.md §4.3: 500 tokens ≈ 1200 chars, 50 tokens
 ≈ 120 chars at CHARS_PER_TOKEN ≈ 2.4.
 """
+
 from __future__ import annotations
 
 import pytest

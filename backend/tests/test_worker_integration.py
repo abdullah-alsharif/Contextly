@@ -6,6 +6,7 @@ async engine — not the infinite worker loop. Fixture PDFs come from
 tests/pdf_fixtures.py (research.md R7). Assertions use an admin psycopg
 connection; RLS assertions use SET ROLE contextly_app + claim like test_rls.py.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -91,8 +92,7 @@ def _seed_document(
     with _admin() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "insert into auth.users (id) values (%s) "
-                "on conflict (id) do nothing",
+                "insert into auth.users (id) values (%s) on conflict (id) do nothing",
                 (user_id,),
             )
             cur.execute(
@@ -112,7 +112,9 @@ def _seed_document(
 def _cleanup_document(document_id: uuid.UUID) -> None:
     with _admin() as conn:
         with conn.cursor() as cur:
-            cur.execute("delete from document_chunks where document_id = %s", (document_id,))
+            cur.execute(
+                "delete from document_chunks where document_id = %s", (document_id,)
+            )
             cur.execute("delete from documents where id = %s", (document_id,))
             cur.execute("delete from profiles where id in (%s, %s)", (USER_A, USER_B))
         conn.commit()
@@ -126,7 +128,13 @@ def _document_row(document_id: uuid.UUID) -> dict:
                 "from documents where id = %s",
                 (document_id,),
             )
-            columns = ("status", "status_error", "retry_count", "total_chunks", "lease_until")
+            columns = (
+                "status",
+                "status_error",
+                "retry_count",
+                "total_chunks",
+                "lease_until",
+            )
             return dict(zip(columns, cur.fetchone(), strict=False))
 
 
@@ -220,10 +228,10 @@ def test_happy_path_produces_page_aware_chunks(tmp_path: Path) -> None:
     document_id = uuid.uuid4()
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
-    data = make_pdf(
-        ["Alpha " * 115 + "page one", "Beta " * 115 + "page two"]
+    data = make_pdf(["Alpha " * 115 + "page one", "Beta " * 115 + "page two"])
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
     )
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
@@ -255,7 +263,9 @@ def test_chunks_are_tenant_isolated_under_rls(tmp_path: Path) -> None:
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
     data = make_pdf(["Private chunk content for user A."])
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
@@ -364,7 +374,9 @@ def test_transient_failures_retry_with_backoff_then_fail(tmp_path: Path) -> None
     storage = _FlakyStorage(root=tmp_path, failures=3)
     asyncio.run(
         storage.upload(
-            key=storage_path, data=make_pdf(["Recoverable content"]), content_type="application/pdf"
+            key=storage_path,
+            data=make_pdf(["Recoverable content"]),
+            content_type="application/pdf",
         )
     )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
@@ -464,10 +476,13 @@ def test_concurrent_claim_has_single_winner(tmp_path: Path) -> None:
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
     data = make_pdf(["One document, two would-be workers."])
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
+
         async def claim_once() -> str | None:
             async with _SessionFactory() as db:
                 claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
@@ -506,17 +521,18 @@ def test_heartbeat_rearms_lease_mid_run(tmp_path: Path) -> None:
     storage = _SlowStorage(root=tmp_path, delay=download_delay)
     asyncio.run(
         storage.upload(
-            key=storage_path, data=make_pdf(["Slow page."]), content_type="application/pdf"
+            key=storage_path,
+            data=make_pdf(["Slow page."]),
+            content_type="application/pdf",
         )
     )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
+
         async def scenario() -> tuple[str, datetime, datetime]:
             async with _SessionFactory() as db:
-                claimed = await pipeline.claim_next(
-                    db, lease_seconds=heartbeat_lease
-                )
+                claimed = await pipeline.claim_next(db, lease_seconds=heartbeat_lease)
                 assert claimed is not None
                 await db.commit()
             initial_lease = _lease_until(document_id)
@@ -548,20 +564,27 @@ def test_heartbeat_rearms_lease_mid_run(tmp_path: Path) -> None:
         outcome, initial_lease, mid_run_lease = asyncio.run(scenario())
 
         assert outcome == "ready"
-        assert mid_run_lease > initial_lease  # re-armed strictly after the first interval
+        assert (
+            mid_run_lease > initial_lease
+        )  # re-armed strictly after the first interval
     finally:
         _cleanup_document(document_id)
 
 
-def test_live_lease_is_not_stolen_and_expired_lease_is_reclaimed(tmp_path: Path) -> None:
+def test_live_lease_is_not_stolen_and_expired_lease_is_reclaimed(
+    tmp_path: Path,
+) -> None:
     document_id = uuid.uuid4()
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
     data = make_pdf(["Lease mechanics."])
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
+
         async def claim_once() -> str | None:
             async with _SessionFactory() as db:
                 claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
@@ -602,7 +625,9 @@ def test_delete_purges_chunks_and_worker_writes_nothing_after(tmp_path: Path) ->
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
     data = make_pdf(["Will be deleted, chunks must vanish."])
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
@@ -646,10 +671,13 @@ def test_delete_during_processing_persists_no_chunks(tmp_path: Path) -> None:
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
     data = make_pdf(["Deleted mid-flight; chunks must never appear."])
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
+
         async def claim_document() -> pipeline.ClaimedDocument:
             async with _SessionFactory() as db:
                 claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
@@ -712,7 +740,9 @@ def test_embed_happy_path_fills_chunk_vectors(tmp_path: Path) -> None:
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
     data = make_pdf(["Alpha " * 115 + "page one", "Beta " * 115 + "page two"])
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
@@ -738,10 +768,13 @@ def test_embed_auth_failure_fails_immediately(tmp_path: Path) -> None:
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
     data = make_pdf(["Embeddable content, then bad key."])
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
+
         async def run() -> str:
             ai = _FailingAI(status_code=401)
             async with _SessionFactory() as db:
@@ -774,10 +807,13 @@ def test_embed_transient_failure_retries_then_fails(tmp_path: Path) -> None:
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
     data = make_pdf(["Embeddable content, provider hiccup."])
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
+
         async def run_once(ai: AIProvider) -> str:
             async with _SessionFactory() as db:
                 claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
@@ -822,7 +858,9 @@ def test_embed_idempotent_ready_no_reprocess(tmp_path: Path) -> None:
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
     data = make_pdf(["Idempotency check content."])
-    asyncio.run(storage.upload(key=storage_path, data=data, content_type="application/pdf"))
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
     _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
 
     try:
