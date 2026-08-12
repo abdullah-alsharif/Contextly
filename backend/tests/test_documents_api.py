@@ -2,8 +2,9 @@
 
 DB-gated: skipped when DATABASE_URL is unreachable (same pattern as test_auth_api.py).
 Covers contracts/documents.md — upload validation matrix (201/400/413/401/502),
-list/detail isolation (200/404/422), delete semantics (204/404), cross-tenant
-404s with owner data intact. Storage is the local provider rooted in a tmp dir.
+list/detail isolation (200/404/422), delete semantics (204/404), reprocess
+(failed→uploaded round trip 200/400/404/401), cross-tenant 404s with owner data
+intact. Storage is the local provider rooted in a tmp dir.
 """
 
 from __future__ import annotations
@@ -464,3 +465,116 @@ def test_delete_purges_processed_chunks(client: TestClient) -> None:
                 (document_id,),
             )
             assert cur.fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Reprocess: PATCH /documents/{id}/reprocess
+# ---------------------------------------------------------------------------
+
+# US: reprocess
+def test_reprocess_failed_round_trip_200(client: TestClient) -> None:
+    """Reprocessing a failed doc resets it to 'uploaded', purges stale chunks,
+    and the worker's next claim re-runs the pipeline to 'ready' (docs/ingestion.md
+    §7: reprocess reuses the exact same worker)."""
+    status, doc = _upload(client, _token(USER_A), content=make_pdf(["Retry content"]))
+    assert status == 201
+    document_id = uuid.UUID(doc["id"])
+
+    async def process() -> None:
+        storage = client.app.state.storage_provider  # type: ignore[attr-defined]
+        settings = Settings(
+            database_url=os.environ["DATABASE_URL"],
+            auth_mode="dev",
+            app_env="dev",
+        )
+        from app.providers.ai import build_ai_provider
+
+        ai = build_ai_provider(settings)
+        async with _TestSessionFactory() as db:
+            claimed = await pipeline.claim_next(db, lease_seconds=300)
+            assert claimed is not None and claimed.id == document_id
+            await db.commit()
+        async with _TestSessionFactory() as db:
+            outcome = await pipeline.process_claimed_document(
+                db, storage, settings, claimed, ai
+            )
+            assert outcome == "ready"
+            await db.commit()
+
+    asyncio.run(process())
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update documents set status = 'failed', status_error = 'boom', "
+                "retry_count = 3, total_chunks = 2 where id = %s",
+                (document_id,),
+            )
+        conn.commit()
+
+    response = client.patch(
+        f"/api/v1/documents/{document_id}/reprocess",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "uploaded"
+    assert body["status_error"] is None
+    assert body["total_chunks"] is None
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, retry_count from documents where id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone() == ("uploaded", 0)
+            cur.execute(
+                "select count(*) from document_chunks where document_id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone()[0] == 0
+
+    asyncio.run(process())
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, total_chunks, status_error from documents where id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone() == ("ready", 1, None)
+
+
+def test_reprocess_not_failed_400(client: TestClient) -> None:
+    token = _token(USER_A)
+    _, doc = _upload(client, token)
+    response = client.patch(
+        f"/api/v1/documents/{doc['id']}/reprocess",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 400
+
+
+def test_reprocess_cross_tenant_404(client: TestClient) -> None:
+    token_a, token_b = _token(USER_A), _token(USER_B)
+    _, doc_a = _upload(client, token_a)
+    response = client.patch(
+        f"/api/v1/documents/{doc_a['id']}/reprocess",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+    assert response.status_code == 404
+
+
+def test_reprocess_nonexistent_404(client: TestClient) -> None:
+    response = client.patch(
+        f"/api/v1/documents/{uuid.uuid4()}/reprocess",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
+    )
+    assert response.status_code == 404
+
+
+def test_reprocess_missing_auth_401(client: TestClient) -> None:
+    assert (
+        client.patch(f"/api/v1/documents/{uuid.uuid4()}/reprocess").status_code == 401
+    )

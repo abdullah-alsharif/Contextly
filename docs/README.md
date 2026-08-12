@@ -23,7 +23,7 @@ architectural decision agreed on before implementation code is written.
 | Sources | Persisted per assistant message (document id, filename, page, chunk, score) |
 | AI abstraction | `AIProvider` (`embed`, `generate`, `stream`) — NVIDIA now, OpenRouter later |
 | Deployment | $0 tiers first (Vercel + Render + Supabase). VPS optional later |
-| Out of MVP | Document reprocessing, hybrid search, reranking, query rewriting, Redis/Celery, async eval dashboards |
+| Out of MVP | Re-indexing of `ready` docs (failed docs reprocess via `PATCH /documents/{id}/reprocess`), hybrid search, reranking, query rewriting, Redis/Celery, async eval dashboards |
 
 ## Document map
 

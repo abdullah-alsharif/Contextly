@@ -166,9 +166,10 @@ docs/tradeoffs.md):
   but inherent to RAG; rate limiting is per-process; `pypdf` is not a hardened parser
   (PDF-only + size caps); no SSO/2FA; the Supabase service-role key must never reach
   the browser bundle.
-- **Deferred features** (deliberately not in MVP): document reprocessing, hybrid
-  search, reranking, query rewriting, Redis/Celery queues, async eval dashboards,
-  hard-delete semantics (soft delete keeps source snapshots consistent).
+- **Deferred features** (deliberately not in MVP): re-indexing of `ready`
+  documents (failed docs can be re-processed — `PATCH /documents/{id}/reprocess`),
+  hybrid search, reranking, query rewriting, Redis/Celery queues, async eval
+  dashboards, hard-delete semantics (soft delete keeps source snapshots consistent).
 - **Tuning**: chunk/top-K defaults validated at the eval ceilings of the committed
   corpus; real-DB `ef_search` latency probing and real-provider answer-quality sweeps
   are documented opt-ins (docs/tuning.md) for when the corpus grows.

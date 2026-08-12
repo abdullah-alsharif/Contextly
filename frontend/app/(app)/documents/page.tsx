@@ -11,7 +11,8 @@ import UploadDropzone from "@/components/upload-dropzone";
 import { useDocuments } from "@/lib/hooks/use-documents";
 
 export default function DocumentsPage() {
-  const { documents, stats, loading, error, upload, remove, deletingId } = useDocuments();
+  const { documents, stats, loading, error, upload, remove, reprocess, deletingId, reprocessingId } =
+    useDocuments();
 
   return (
     <div className="mx-auto max-w-6xl px-8 py-8">
@@ -62,7 +63,13 @@ export default function DocumentsPage() {
             hint="Upload a PDF above — it will be chunked and indexed automatically so you can chat with it."
           />
         ) : (
-          <DocumentTable documents={documents} onDelete={(id) => void remove(id)} deletingId={deletingId} />
+          <DocumentTable
+            documents={documents}
+            onDelete={(id) => void remove(id)}
+            onReprocess={(id) => void reprocess(id)}
+            deletingId={deletingId}
+            reprocessingId={reprocessingId}
+          />
         )}
       </section>
     </div>

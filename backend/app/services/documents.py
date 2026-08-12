@@ -78,6 +78,22 @@ _SOFT_DELETE = text(
     """
 )
 
+_REPROCESS = text(
+    """
+    update documents
+    set status = 'uploaded',
+        total_chunks = null,
+        status_error = null,
+        retry_count = 0,
+        lease_until = null,
+        updated_at = now()
+    where id = :document_id and user_id = :user_id
+      and deleted_at is null and status = 'failed'
+    returning id, filename, status, file_size_bytes, total_chunks, status_error,
+              created_at, updated_at
+    """
+)
+
 _PURGE_CHUNKS = text("delete from document_chunks where document_id = :document_id")
 
 
@@ -99,6 +115,10 @@ class SignedUrlError(Exception):
 
 class DocumentNotFoundError(Exception):
     """Document missing, not owned, or deleted (→ 404, deliberately ambiguous)."""
+
+
+class ReprocessNotAllowedError(Exception):
+    """Document exists but is not in a reprocessable state (→ 400)."""
 
 
 def sanitize_filename(filename: str) -> str:
@@ -225,6 +245,36 @@ async def delete_document(
             storage_path,
             exc,
         )
+
+
+async def reprocess_document(
+    db: AsyncSession,
+    identity: Identity,
+    document_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Reset a failed document to 'uploaded' and purge its chunks so the worker
+    re-runs the full pipeline (docs/ingestion.md §7 re-indexing).
+
+    Owner-only scoped: a foreign/missing id raises DocumentNotFoundError (404).
+    Only `failed` documents are eligible — everything else raises
+    ReprocessNotAllowedError (400). Chunk purge runs in the same transaction
+    as the status reset, so a reprocessed document never shows stale chunks.
+    """
+    result = await db.execute(
+        _REPROCESS,
+        {"document_id": str(document_id), "user_id": str(identity.user_id)},
+    )
+    row = result.one_or_none()
+    if row is None:
+        existing = await db.execute(
+            _GET_DOCUMENT,
+            {"document_id": str(document_id), "user_id": str(identity.user_id)},
+        )
+        if existing.one_or_none() is None:
+            raise DocumentNotFoundError("document not found")
+        raise ReprocessNotAllowedError("only failed documents can be reprocessed")
+    await db.execute(_PURGE_CHUNKS, {"document_id": str(document_id)})
+    return _serialize(row)
 
 
 async def get_document_download_url(

@@ -1,8 +1,7 @@
 "use client";
 
 // Top bar — mirrors prototypes/chat.html header: search pill on
-// surface-container-low with AI focus ring, Upload CTA with shadow, avatar
-// actions separated by a hairline.
+// surface-container-low with AI focus ring and Upload CTA with shadow.
 import Link from "next/link";
 
 export default function Topbar() {
@@ -29,24 +28,6 @@ export default function Topbar() {
         >
           Upload
         </Link>
-        <div className="flex items-center gap-2 border-l border-surface-variant pl-4">
-          <button
-            type="button"
-            title="Notifications"
-            aria-label="Notifications"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-secondary"
-          >
-            <span className="material-symbols-outlined">notifications</span>
-          </button>
-          <Link
-            href="/settings"
-            title="Account"
-            aria-label="Account"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-secondary"
-          >
-            <span className="material-symbols-outlined">account_circle</span>
-          </Link>
-        </div>
       </div>
     </header>
   );

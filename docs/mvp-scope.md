@@ -24,7 +24,7 @@ Multi-tenant security (RLS + query scoping + storage isolation)
 
 | Feature | Why deferred | When to revisit |
 |---|---|---|
-| Document reprocessing | reuses pipeline; pure UX sugar for MVP | after eval shows chunking is wrong |
+| Document reprocessing | added for `failed` docs (Phase 12); re-indexing of `ready` docs stays out | when tuning changes chunking |
 | Multiple providers in prod | one `AI_PROVIDER` at a time behind the interface | when NVIDIA free tier weakens |
 | Hybrid search / reranking / query rewriting | no evidence of need; adds complexity | when eval recall@K or demo fails |
 | Parent–child retrieval | tuning overhead | when answer quality demands smaller chunks |

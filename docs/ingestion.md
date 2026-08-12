@@ -9,6 +9,7 @@ stateDiagram-v2
   processing --> ready : parse + chunk + embed + persist
   processing --> failed : parse/embed error
   failed --> processing : retry (max 3, backoff) — admin/manual only in practice
+  failed --> uploaded : PATCH /documents/{id}/reprocess (manual, chunks purged)
   uploaded --> failed : worker crash without recovery
   ready --> deleted : DELETE /documents (soft delete + chunk purge)
   failed --> deleted : DELETE /documents
@@ -95,7 +96,7 @@ flowchart LR
 | Max pages | None hard-coded; practical guard ~200 pages → soft warning (skip for MVP) |
 | Duplicate files | No strict dedupe; uploading the same file twice creates two documents. Output-path collision is avoided because paths embed `document_id` |
 | Document deletion | `DELETE /documents/{id}` → soft-delete row + delete chunks + delete file from storage. Conversations which referenced the doc remain, and their retrieval filter simply excludes the missing doc |
-| Re-indexing | Out of MVP scope (explicitly deferred). Validated re-trigger of the pipeline; when added, it reuses the exact same worker with a `reprocess` action |
+| Re-indexing | `PATCH /documents/{id}/reprocess` re-queues a `failed` document: status → `uploaded`, chunks purged, counters cleared — the existing worker re-runs the exact same pipeline (docs/api.md §2). Reprocessing `ready` documents stays out of MVP scope |
 | Partial failures | Failures are per-document (parse/embed). Chunks are inserted in one transaction at step 5 → an embedding failure leaves the doc `failed` with no half-written chunks. If a document has zero valid pages, treat as parse failure |
 | Retry | Max 3 attempts, exponential backoff (1s → 5s → 30s), then `failed` |
 

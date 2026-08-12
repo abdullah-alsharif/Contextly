@@ -197,6 +197,10 @@ export function deleteDocument(id: string): Promise<void> {
   return request<void>(`/api/v1/documents/${id}`, { method: "DELETE" });
 }
 
+export function reprocessDocument(id: string): Promise<Document> {
+  return request<Document>(`/api/v1/documents/${id}/reprocess`, { method: "PATCH" });
+}
+
 export function getDownloadUrl(id: string): Promise<{ url: string; expires_at: string }> {
   return request<{ url: string; expires_at: string }>(
     `/api/v1/documents/${id}/download-url`,

@@ -1,6 +1,8 @@
 // Documents table (docs/frontend-design.md §3): border-less rows, 1px
-// dividers, hover #F8FAFC, kebab actions on hover, body-sm density,
-// pagination footer. Delete has an inline confirm step.
+// dividers, hover #F8FAFC, body-sm density, pagination footer. Failed rows
+// show an always-visible Re-process action (failure is a moment for
+// direction); delete is a separate icon revealed on hover with an inline
+// confirm step.
 "use client";
 
 import { useMemo, useState } from "react";
@@ -26,11 +28,15 @@ function formatDate(iso: string): string {
 export default function DocumentTable({
   documents,
   onDelete,
+  onReprocess,
   deletingId,
+  reprocessingId,
 }: {
   documents: Document[];
   onDelete: (id: string) => void;
+  onReprocess: (id: string) => void;
   deletingId: string | null;
+  reprocessingId: string | null;
 }) {
   const [page, setPage] = useState(0);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -100,15 +106,38 @@ export default function DocumentTable({
                       </button>
                     </span>
                   ) : (
-                    <button
-                      type="button"
-                      title="Delete document"
-                      aria-label={`Delete ${document.filename}`}
-                      onClick={() => setConfirmId(document.id)}
-                      className="rounded-md p-1.5 text-on-surface-variant opacity-0 transition-all hover:bg-error-container/50 hover:text-error focus:opacity-100 group-hover:opacity-100"
-                    >
-                      <span className="material-symbols-outlined text-sm">more_vert</span>
-                    </button>
+                    <span className="inline-flex items-center justify-end gap-1">
+                      {document.status === "failed" && (
+                        <button
+                          type="button"
+                          title="Re-process document"
+                          aria-label={`Re-process ${document.filename}`}
+                          disabled={reprocessingId !== null}
+                          onClick={() => onReprocess(document.id)}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-display text-label-sm font-medium text-secondary transition-colors hover:bg-secondary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span
+                            className="material-symbols-outlined text-sm"
+                            aria-hidden="true"
+                          >
+                            {reprocessingId === document.id ? "sync" : "replay"}
+                          </span>
+                          {reprocessingId === document.id
+                            ? "Reprocessing…"
+                            : "Re-process"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        title="Delete document"
+                        aria-label={`Delete ${document.filename}`}
+                        disabled={reprocessingId === document.id}
+                        onClick={() => setConfirmId(document.id)}
+                        className="rounded-md p-1.5 text-on-surface-variant opacity-0 transition-all hover:bg-error-container/50 hover:text-error focus:opacity-100 group-hover:opacity-100 disabled:opacity-0"
+                      >
+                        <span className="material-symbols-outlined text-sm">delete</span>
+                      </button>
+                    </span>
                   )}
                 </td>
               </tr>

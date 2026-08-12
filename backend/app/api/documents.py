@@ -25,6 +25,7 @@ from app.schemas.document import DocumentOut, DownloadUrlOut
 from app.services.documents import (
     DocumentNotFoundError,
     InvalidUploadError,
+    ReprocessNotAllowedError,
     SignedUrlError,
     UploadFailedError,
     UploadTooLargeError,
@@ -33,6 +34,7 @@ from app.services.documents import (
     get_document,
     get_document_download_url,
     list_documents,
+    reprocess_document,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,3 +165,19 @@ async def remove_document(
         await delete_document(db, storage, identity, document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/{document_id}/reprocess", response_model=DocumentOut)
+async def reprocess_document_endpoint(
+    document_id: uuid.UUID,
+    identity: Identity = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Re-queue a failed document: status → 'uploaded', chunks purged, so the
+    worker re-runs parse → chunk → embed (docs/api.md §2, docs/ingestion.md §7)."""
+    try:
+        return await reprocess_document(db, identity, document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ReprocessNotAllowedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

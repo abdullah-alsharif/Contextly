@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   deleteDocument,
   listDocuments,
+  reprocessDocument,
   uploadDocument,
   type Document,
 } from "@/lib/api-client";
@@ -44,6 +45,7 @@ export function useDocuments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [reprocessingId, setReprocessingId] = useState<string | null>(null);
 
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -106,7 +108,35 @@ export function useDocuments() {
     [],
   );
 
+  const reprocess = useCallback(
+    async (id: string) => {
+      setReprocessingId(id);
+      try {
+        const document = await reprocessDocument(id);
+        setDocuments((rows) =>
+          rows.map((row) => (row.id === id ? document : row)),
+        );
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Reprocessing failed.");
+      } finally {
+        setReprocessingId(null);
+      }
+    },
+    [],
+  );
+
   const stats = deriveStats(documents);
 
-  return { documents, stats, loading, error, upload, remove, deletingId };
+  return {
+    documents,
+    stats,
+    loading,
+    error,
+    upload,
+    remove,
+    reprocess,
+    deletingId,
+    reprocessingId,
+  };
 }

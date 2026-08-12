@@ -32,7 +32,7 @@ the backend only validates JWTs. The backend exposes `/auth/me` for the profile.
 | GET | `/documents` | – | `200 [{document}]` (status filter optional `?status=`) | 401 |
 | GET | `/documents/{id}` | – | `200 {document, processing: {...}}` | 404 |
 | DELETE | `/documents/{id}` | – | `204` | 404 |
-| PATCH | `/documents/{id}/reprocess` | – | deferred (not in MVP) | 501 |
+| PATCH | `/documents/{id}/reprocess` | – | `200 {document}` (status reset to `uploaded`) | 400 (not failed), 404 |
 
 Document object:
 ```json
@@ -53,6 +53,12 @@ short-lived `WS/EventSource`) until `ready | failed`.
 size ≤ 10 MB (checked pre-upload and enforced again by the storage policy);
 filename sanitized (strip path + control chars). Storage path is server-generated
 (`{user_id}/docs/{document_id}.pdf`) — client filename is never used as a path.
+
+**Reprocessing:** `PATCH /documents/{id}/reprocess` re-queues a **failed**
+document: status → `uploaded`, `retry_count`/`status_error`/`total_chunks`
+cleared, chunks purged (same transaction) and the existing worker picks it up
+(docs/ingestion.md §7). Non-`failed` documents → `400`; the 404 rules are
+unchanged (docs/security.md §2).
 
 ## 3. Conversations
 
