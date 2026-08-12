@@ -44,6 +44,7 @@ architectural decision agreed on before implementation code is written.
 | [frontend-design.md](frontend-design.md) | UI design system → Tailwind tokens, components, page layouts |
 | [observability.md](observability.md) | Structured logging, metrics, tracing |
 | [testing.md](testing.md) | Test strategy + RAG evaluation dataset |
+| [tuning.md](tuning.md) | Phase 12 eval sweep results, decisions, and trade-offs |
 | [mvp-scope.md](mvp-scope.md) | Strict MVP definition |
 | [roadmap.md](roadmap.md) | Incremental phases 0–12 with definitions of done |
 | [tradeoffs.md](tradeoffs.md) | Trade-offs, risks, future scaling strategy |

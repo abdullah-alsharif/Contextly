@@ -56,11 +56,11 @@ make migrate   # apply infrastructure/migrations
 make test      # backend pytest
 ```
 
-Current task: **Phase 11** (production deployment, $0 stack) per `docs/roadmap.md` —
-spec/plan/tasks in `specs/012-production-deployment/`. Committed `render.yaml` (web
-service + worker, `/healthz` health check, migrations as `preDeployCommand`),
-deploy-blocker guards (`MIGRATION_DATABASE_URL`, `STORAGE_PROVIDER=local` rejected
-outside dev, `LOG_LEVEL`), Vercel frontend env (`NEXT_PUBLIC_*`), runbook + verification
-checklist in `docs/deployment.md §9-10`, and the credential walkthrough in
-`docs/deployment-walkthrough.md`. Credential-bound steps (T012-T024) need Supabase/
-Render/Vercel/NVIDIA or OpenRouter; tuning is Phase 12.
+Current task: **Phase 12** (polish — final roadmap phase) per `docs/roadmap.md` —
+spec/plan/tasks in `specs/013-polish-tuning-portfolio/`. Eval sweep driver
+(`eval/sweep.py`, `make eval-sweep`) + committed sweep report
+(`eval/reports/tuning-sweep.md`), defaults confirmed via measurement and kept
+(`docs/tuning.md`), portfolio README rewritten at the repo root. Deployment
+(Phase 11) artifacts remain in `specs/012-production-deployment/`; credential-bound
+steps T012-T024 (Supabase/Render/Vercel/NVIDIA or OpenRouter) still need live
+verification before the README's live links can be filled in.

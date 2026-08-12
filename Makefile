@@ -1,4 +1,4 @@
-.PHONY: up down logs migrate test eval lint
+.PHONY: up down logs migrate test eval eval-sweep lint
 
 PYTHON ?= python3
 
@@ -23,6 +23,12 @@ eval: ## Phase 10 RAG eval (headless, hermetic, fake provider) + eval unit tests
 	# backend/requirements.txt`): PYTHON ?= python3 here.
 	PYTHONPATH=backend $(PYTHON) -m eval.run_eval --out eval/reports/rag-eval.md && \
 	PYTHONPATH=backend $(PYTHON) -m pytest eval/tests -q
+
+eval-sweep: ## Phase 12 RAG parameter sweep (docs/rag.md §2 grid, hermetic) + sweep tests
+	# Measurement-only: never touches eval/reports/rag-eval.md (baseline guard,
+	# docs/tuning.md). Same local-deps requirement as `eval`.
+	PYTHONPATH=backend $(PYTHON) -m eval.sweep --out eval/reports/tuning-sweep.md && \
+	PYTHONPATH=backend $(PYTHON) -m pytest eval/tests/test_sweep.py -q
 
 lint: ## Backend: ruff + mypy · Frontend: tsc + eslint
 	docker compose exec backend ruff check app
