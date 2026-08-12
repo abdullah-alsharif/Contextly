@@ -1,0 +1,98 @@
+# Render blueprint — Contextly $0 stack (docs/deployment.md §2, §4, §6).
+# Two free-plan services: FastAPI web (/healthz, migrations as preDeployCommand)
+# and the DB-backed worker. `sync: false` values live only in Render's secret
+# store — nothing real is committed (docs/security.md §5-6).
+
+services:
+  - type: web
+    name: contextly-backend
+    runtime: docker
+    repo: https://github.com/YOUR_ORG/contextly
+    plan: free
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /healthz
+    preDeployCommand: python -m app.migrate
+    dockerContext: .
+    dockerfilePath: backend/Dockerfile
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: AUTH_MODE
+        value: supabase
+      - key: STORAGE_PROVIDER
+        value: supabase
+      - key: AI_PROVIDER
+        value: nvidia
+      - key: STORAGE_BUCKET
+        value: documents
+      - key: UPLOAD_MAX_BYTES
+        value: "10485760"
+      - key: LOG_LEVEL
+        value: info
+      - key: RATE_LIMIT_CHAT_PER_MINUTE
+        value: "30"
+      - key: RATE_LIMIT_GENERAL_PER_MINUTE
+        value: "120"
+      - key: STORAGE_SIGNED_URL_TTL_SECONDS
+        value: "300"
+      # CORS allowlist: the production frontend origin (docs/deployment.md §5).
+      - key: CORS_ORIGINS
+        value: https://YOUR_PROJECT.vercel.app
+      - key: DATABASE_URL
+        sync: false
+      - key: MIGRATION_DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: SUPABASE_JWKS_URL
+        sync: false
+
+  - type: worker
+    name: contextly-worker
+    runtime: docker
+    repo: https://github.com/YOUR_ORG/contextly
+    plan: free
+    branch: main
+    autoDeploy: true
+    startCommand: python -m app.worker
+    dockerContext: .
+    dockerfilePath: backend/Dockerfile
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: AUTH_MODE
+        value: supabase
+      - key: STORAGE_PROVIDER
+        value: supabase
+      - key: AI_PROVIDER
+        value: nvidia
+      - key: STORAGE_BUCKET
+        value: documents
+      - key: LOG_LEVEL
+        value: info
+      # Worker loop knobs (docs/ingestion.md §3) at documented defaults.
+      - key: WORKER_POLL_INTERVAL_SECONDS
+        value: "5"
+      - key: WORKER_LEASE_SECONDS
+        value: "300"
+      - key: WORKER_MAX_RETRIES
+        value: "3"
+      - key: WORKER_RETRY_BACKOFF_SECONDS
+        value: "1,5,30"
+      # NVIDIA nv-embedqa-e5-v5 caps inputs at 512 tokens — 400 keeps chunks
+      # under it with AI_PROVIDER=nvidia (docs/ai-providers.md §2).
+      - key: CHUNK_SIZE_TOKENS
+        value: "400"
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false

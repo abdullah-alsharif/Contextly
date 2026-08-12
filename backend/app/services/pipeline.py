@@ -46,6 +46,13 @@ _INSERT_CHUNK = text(
     """
 )
 
+_DELETE_CHUNKS = text(
+    """
+    delete from document_chunks
+    where document_id = :document_id
+    """
+)
+
 _FINALIZE = text(
     """
     update documents
@@ -187,6 +194,10 @@ async def _persist(
     chunks: list[Chunk],
     embeddings: list[list[float]],
 ) -> None:
+    # A reprocess (retry, or a re-claimed document with stale rows) must never
+    # collide with leftover chunks: clear first, same transaction
+    # (docs/ingestion.md §3 — processing is idempotent per document).
+    await db.execute(_DELETE_CHUNKS, {"document_id": str(claimed.id)})
     for index, chunk in enumerate(chunks):
         await db.execute(
             _INSERT_CHUNK,

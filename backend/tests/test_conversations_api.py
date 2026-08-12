@@ -131,10 +131,13 @@ def seeded() -> None:
     yield
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
-            cur.execute("delete from conversation_documents")
-            cur.execute("delete from conversations")
+            # Scope cleanup to the fixture's users only (FKs cascade chunks,
+            # conversations, messages) — never wipe shared dev data.
             cur.execute(
                 "delete from documents where user_id in (%s, %s)", (USER_A, USER_B)
+            )
+            cur.execute(
+                "delete from conversations where user_id in (%s, %s)", (USER_A, USER_B)
             )
             cur.execute("delete from profiles where id in (%s, %s)", (USER_A, USER_B))
         conn.commit()

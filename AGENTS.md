@@ -56,12 +56,11 @@ make migrate   # apply infrastructure/migrations
 make test      # backend pytest
 ```
 
-Current task: **Phase 10** (RAG evaluation) per `docs/roadmap.md` —
-spec/plan/tasks in `specs/011-rag-evaluation/`. Adds the `eval/` harness
-(`eval/run_eval.py` + `eval/generate_documents.py` + `eval/embedding.py`), the
-committed seed corpus (`eval/documents/`), 60 fixture queries
-(`eval/datasets/qa.json`), a committed deterministic report
-(`eval/reports/rag-eval.md`), the CI gate `recall@6 ≥ 0.85` (hermetic lexical
-embeddings under `AI_PROVIDER=fake`, real embeddings opt-in), `eval/tests/`, and
-the `make eval` target. No retrieval/chunking/default changes — measuring only;
-tuning is Phase 12 (docs/testing.md §6).
+Current task: **Phase 11** (production deployment, $0 stack) per `docs/roadmap.md` —
+spec/plan/tasks in `specs/012-production-deployment/`. Committed `render.yaml` (web
+service + worker, `/healthz` health check, migrations as `preDeployCommand`),
+deploy-blocker guards (`MIGRATION_DATABASE_URL`, `STORAGE_PROVIDER=local` rejected
+outside dev, `LOG_LEVEL`), Vercel frontend env (`NEXT_PUBLIC_*`), runbook + verification
+checklist in `docs/deployment.md §9-10`, and the credential walkthrough in
+`docs/deployment-walkthrough.md`. Credential-bound steps (T012-T024) need Supabase/
+Render/Vercel/NVIDIA or OpenRouter; tuning is Phase 12.

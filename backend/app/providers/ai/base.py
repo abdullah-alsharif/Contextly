@@ -37,9 +37,13 @@ class AIProvider(Protocol):
     supports_streaming: bool  # False → callers fall back to one full-answer event
 
     async def embed(
-        self, texts: list[str], *, batch_size: int = 32
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
     ) -> list[list[float]]:
-        """Embed texts; order preserved. Raises AIProviderError on failure."""
+        """Embed texts; order preserved. Raises AIProviderError on failure.
+
+        `input_type` (query|passage) only matters for asymmetric models; others
+        ignore it.
+        """
 
     async def generate(
         self,

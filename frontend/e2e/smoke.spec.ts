@@ -62,12 +62,16 @@ test("smoke: login → upload → ready → chat → cite", async ({ page }) => 
   await expect(page.getByRole("status").and(page.getByLabel("Thinking"))).toBeVisible();
 
   // Streamed answer content arrives; then the citation chip appears when the
-  // provider emits its [1] delta (fake provider, dev stack).
+  // provider emits its [1] delta (dev stack). The answer text differs by
+  // provider: a real model cites the excerpt inline ("…from purchase [1]."),
+  // the fake provider streams its canned "Answer for …" text — accept either.
   const chip = page.getByRole("button", {
     name: /\[1\] sample\.pdf p\.1/,
   });
   await expect(chip).toBeVisible({ timeout: 120_000 });
-  await expect(page.getByText("Answer for", { exact: false })).toBeVisible();
+  await expect(page.locator(".whitespace-pre-wrap")).toContainText(
+    /The refund period is 30 days from purchase|Answer for/,
+  );
 
   // -- Source viewer: persistent right panel with [1] card (prototype) -------
   await chip.click();

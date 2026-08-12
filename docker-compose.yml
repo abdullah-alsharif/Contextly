@@ -50,7 +50,9 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment: *backend-env
     volumes:
       - ./backend:/app
@@ -63,7 +65,9 @@ services:
         condition: service_healthy
 
   worker:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment: *backend-env
     volumes:
       - ./backend:/app

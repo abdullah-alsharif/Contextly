@@ -14,7 +14,7 @@ architectural decision agreed on before implementation code is written.
 | Backend | FastAPI (Python) — Python for RAG/document processing |
 | Frontend | Next.js + TypeScript + Tailwind |
 | Async processing | DB-backed worker (polling + lease/heartbeat). **No Redis/Celery/RabbitMQ** |
-| Embedding model | Locked early; default NVIDIA `bge-m3` (1024 dims). Vector dims must match the model |
+| Embedding model | Locked early; default NVIDIA `nv-embedqa-e5-v5` (1024 dims, hosted API — `bge-m3` retired there). Vector dims must match the model |
 | Vector index | pgvector HNSW, L2 distance, `vector(1024)` |
 | Chunking defaults | ~500 tokens, ~50 token overlap (≈1200/120 chars), page-aware |
 | Retrieval defaults | Top-K 6, cosine/L2, no hard score threshold initially, scores logged |
@@ -39,6 +39,7 @@ architectural decision agreed on before implementation code is written.
 | [ai-providers.md](ai-providers.md) | `AIProvider` / `StorageProvider` abstractions |
 | [security.md](security.md) | Auth, uploads, RAG security, API security |
 | [deployment.md](deployment.md) | $0 deployment, env vars, migrations, CI/CD |
+| [deployment-walkthrough.md](deployment-walkthrough.md) | Beginner path: get every account/credential and run the deployment |
 | [local-dev.md](local-dev.md) | Docker Compose, repo structure, first-run commands |
 | [frontend-design.md](frontend-design.md) | UI design system → Tailwind tokens, components, page layouts |
 | [observability.md](observability.md) | Structured logging, metrics, tracing |

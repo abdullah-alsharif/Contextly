@@ -50,7 +50,7 @@ class OpenRouterProvider:
         self._transport = transport
 
     async def embed(
-        self, texts: list[str], *, batch_size: int = 32
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
     ) -> list[list[float]]:
         """Embed texts in batches; order preserved (contracts §1)."""
         if not texts:

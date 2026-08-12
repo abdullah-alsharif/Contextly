@@ -157,11 +157,10 @@ def seeded() -> None:
     yield
     with _admin() as conn:
         with conn.cursor() as cur:
-            cur.execute("delete from messages")
-            cur.execute("delete from conversation_documents")
-            cur.execute("delete from conversations")
-            cur.execute("delete from document_chunks")
+            # Scope cleanup to the fixture's user only (FKs cascade chunks,
+            # conversations, messages) — never wipe shared dev data.
             cur.execute("delete from documents where user_id = %s", (SVC_USER,))
+            cur.execute("delete from conversations where user_id = %s", (SVC_USER,))
             cur.execute("delete from profiles where id = %s", (SVC_USER,))
         conn.commit()
 

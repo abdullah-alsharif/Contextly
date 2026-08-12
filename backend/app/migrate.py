@@ -1,8 +1,11 @@
 """Numbered-SQL migrations runner (python -m app.migrate).
 
-Connects via DATABASE_URL, ensures a schema_migrations ledger, applies unapplied
-files matching ^(\\d+)_.*\\.sql$ in ascending numeric order — each in its own
-transaction — and no-ops cleanly when the directory is empty (research.md D4).
+Connects via DATABASE_URL (or MIGRATION_DATABASE_URL when set — the pre-deploy
+migration connection, docs/deployment.md §4), ensures a schema_migrations
+ledger, applies unapplied files matching ^(\\d+)_.*\\.sql$ in ascending numeric
+order — each in its own transaction — and no-ops cleanly when the directory is
+empty (research.md D4). Outside dev, MIGRATION_DATABASE_URL is required: DDL
+must never run as the runtime role (docs/security.md §6).
 """
 
 import logging
@@ -11,7 +14,7 @@ from pathlib import Path
 
 from psycopg import Connection, connect
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,22 @@ def _applied_filenames(conn: Connection) -> set[str]:
         return {row[0] for row in cur.fetchall()}
 
 
+def resolve_database_url(settings: Settings) -> str:
+    """MIGRATION_DATABASE_URL when set, else DATABASE_URL (docs/deployment.md §4).
+
+    Deploy blocker: outside dev, the migration connection is mandatory — the
+    runtime role must never execute DDL (docs/security.md §6). Fails loudly
+    instead of silently falling back.
+    """
+    if settings.app_env != "dev" and not settings.migration_database_url:
+        raise RuntimeError(
+            "MIGRATION_DATABASE_URL must be set when APP_ENV != dev "
+            f"(got APP_ENV={settings.app_env!r}); refusing to run DDL as the "
+            "runtime role"
+        )
+    return settings.migration_database_url or settings.database_url
+
+
 def apply_migrations(migrations_dir: Path, database_url: str) -> int:
     applied = 0
     with connect(database_url) as conn:
@@ -70,8 +89,9 @@ def apply_migrations(migrations_dir: Path, database_url: str) -> int:
 
 def main() -> None:
     settings = get_settings()
+    database_url = resolve_database_url(settings)
     migrations_dir = Path(settings.migrations_dir)
-    applied = apply_migrations(migrations_dir, settings.database_url)
+    applied = apply_migrations(migrations_dir, database_url)
     print(f"applied {applied} migration(s)")
 
 

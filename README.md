@@ -45,6 +45,13 @@ make lint      # ruff + mypy (backend) · tsc + eslint (frontend)
 
 Real values are never committed. `.env` and `data/` are gitignored.
 
+## Production ($0 stack)
+
+Deploy to Vercel + Render + Supabase with a real AI provider — accounts, credentials,
+and step-by-step instructions in **[docs/deployment-walkthrough.md](docs/deployment-walkthrough.md)**.
+Condensed operator runbook + post-deploy verification checklist:
+[docs/deployment.md §9-10](docs/deployment.md).
+
 ## Remapping host ports
 
 Compose maps host → container ports in `docker-compose.yml` (`5432:5432` db, `8000:8000`

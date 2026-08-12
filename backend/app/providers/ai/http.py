@@ -57,6 +57,7 @@ async def post_embeddings(
     texts: list[str],
     embedding_dims: int,
     dimensions: int | None = None,
+    extra_body: dict[str, object] | None = None,
     retries: int = 3,
     backoff_seconds: tuple[float, ...] = (1.0, 2.0, 4.0),
     transport: httpx.AsyncBaseTransport | None = None,
@@ -70,6 +71,8 @@ async def post_embeddings(
     body: dict[str, object] = {"model": model, "input": texts}
     if dimensions is not None:
         body["dimensions"] = dimensions
+    if extra_body:
+        body.update(extra_body)
 
     for attempt in range(retries + 1):
         try:

@@ -79,7 +79,7 @@ class _FixedVectorProvider:
     embedding_model = "test-fixed"
 
     async def embed(
-        self, texts: list[str], *, batch_size: int = 32
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
     ) -> list[list[float]]:
         return [QUERY_VECTOR for _ in texts]
 
@@ -91,7 +91,7 @@ class _FailingProvider(_FixedVectorProvider):
         self.calls = 0
 
     async def embed(
-        self, texts: list[str], *, batch_size: int = 32
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
     ) -> list[list[float]]:
         self.calls += 1
         raise AIProviderError("simulated outage", provider="test", status_code=500)
@@ -216,11 +216,13 @@ def cleanup_after() -> None:
     yield
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
-            cur.execute("delete from conversation_documents")
-            cur.execute("delete from conversations")
-            cur.execute("delete from document_chunks")
+            # Scope cleanup to the fixture's users only (FKs cascade chunks,
+            # conversations, messages) — never wipe shared dev data.
             cur.execute(
                 "delete from documents where user_id in (%s, %s)", (USER_A, USER_B)
+            )
+            cur.execute(
+                "delete from conversations where user_id in (%s, %s)", (USER_A, USER_B)
             )
             cur.execute("delete from profiles where id in (%s, %s)", (USER_A, USER_B))
         conn.commit()
@@ -412,8 +414,10 @@ def test_rag_endpoint_absent_outside_dev(
         app_env="prod",
         ai_provider="nvidia",
         nvidia_api_key="test",
-        storage_provider="local",
-        local_storage_dir=str(tmp_path_factory.mktemp("storage")),
+        # STORAGE_PROVIDER=local is dev-only; prod tests must use supabase.
+        storage_provider="supabase",
+        supabase_url="https://project.supabase.co",
+        supabase_service_role_key="test-service-role",
     )
     with _make_client(prod_settings) as prod_client:
         response = prod_client.post(

@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql://contextly:contextly@db:5432/contextly"
     )
+    # Pre-deploy DDL role (docs/deployment.md §4); empty in dev → database_url.
+    migration_database_url: str = ""
+    # Log-level knob (docs/observability.md §1).
+    log_level: str = "info"
     ai_provider: str = "fake"
     storage_provider: str = "local"
     local_storage_dir: str = "/data/storage"
@@ -55,7 +59,7 @@ class Settings(BaseSettings):
     nvidia_api_key: str = ""
     nvidia_embeddings_url: str = "https://integrate.api.nvidia.com/v1/embeddings"
     nvidia_chat_url: str = "https://integrate.api.nvidia.com/v1/chat/completions"
-    nvidia_chat_model: str = "nvidia/llama-3.1-nemotron-70b-instruct"
+    nvidia_chat_model: str = "meta/llama-3.3-70b-instruct"
     openrouter_api_key: str = ""
     openrouter_embeddings_url: str = "https://openrouter.ai/api/v1/embeddings"
     openrouter_chat_url: str = "https://openrouter.ai/api/v1/chat/completions"
@@ -79,6 +83,18 @@ class Settings(BaseSettings):
         if value not in ("dev", "supabase"):
             raise ValueError(f"auth_mode must be 'dev' or 'supabase', got {value!r}")
         return value
+
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, value: str) -> str:
+        # Accept stdlib level names in any case; unknown ones fail at startup.
+        normalized = value.strip().lower()
+        if normalized not in ("debug", "info", "warning", "error", "critical"):
+            raise ValueError(
+                f"log_level must be one of debug/info/warning/error/critical, "
+                f"got {value!r}"
+            )
+        return normalized
 
     @field_validator("rate_limit_chat_per_minute", "rate_limit_general_per_minute")
     @classmethod

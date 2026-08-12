@@ -86,7 +86,9 @@ async def _embed_question(ai: AIProvider, question: str) -> list[float]:
     """
     for attempt in range(2):
         try:
-            return (await ai.embed([question]))[0]
+            return (
+                await ai.embed([question], input_type="query")
+            )[0]
         except AIProviderError as exc:
             if attempt == 0 and exc.status_code not in (401, 403):
                 continue

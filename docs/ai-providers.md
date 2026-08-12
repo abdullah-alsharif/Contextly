@@ -14,8 +14,15 @@ class AIProvider(Protocol):
     embedding_model: str                # for logs/metrics
     chat_model: str
 
-    async def embed(self, texts: list[str], *, batch_size: int = 32) -> list[list[float]]:
-        """Embed texts; order preserved. Raises AIProviderError on failure."""
+    async def embed(
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
+    ) -> list[list[float]]:
+        """Embed texts; order preserved. Raises AIProviderError on failure.
+
+        `input_type` ("passage"|"query") is only meaningful for asymmetric
+        embedding models (NVIDIA nv-embedqa-e5-v5); symmetric providers ignore
+        it. Documents embed as "passage"; the user's question as "query"
+        (services/retrieval.py)."""
 
     async def generate(
         self,
@@ -32,7 +39,7 @@ Implementations:
 
 | Class | Notes |
 |---|---|
-| `NvidiaProvider` | NVIDIA Build endpoints: embeddings (`nvidia/bge-m3`, 1024 dims), chat (`nvidia/llama-3.1-nemotron-70b-instruct` or similar free endpoint). Uses `NVIDIA_API_KEY` |
+| `NvidiaProvider` | NVIDIA Build endpoints: embeddings (`nvidia/nv-embedqa-e5-v5`, 1024 dims — the model routed by the hosted NV-API; `nvidia/bge-m3` was retired there and 404s. Asymmetric: requires `input_type` in the request body, query/passage. **Input cap: 512 tokens per text** — operate at `CHUNK_SIZE_TOKENS=400` with real NVIDIA embeddings), chat (`meta/llama-3.3-70b-instruct` or similar free endpoint). Uses `NVIDIA_API_KEY` |
 | `OpenRouterProvider` | `openrouter/…` chat + `openai/…` embeddings; uses `OPENROUTER_API_KEY`. Enabled by `AI_PROVIDER=openrouter` |
 
 Selection:

@@ -19,8 +19,12 @@ from app.providers.ai.http import post_chat, post_embeddings
 
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1/embeddings"
 DEFAULT_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-DEFAULT_MODEL = "nvidia/bge-m3"
+# Free NV-API routes nv-embedqa-e5-v5 (1024 dims); bge-m3 retired there (404).
+# Asymmetric: requires `input_type`, set by the retrieval service.
+DEFAULT_MODEL = "nvidia/nv-embedqa-e5-v5"
 DEFAULT_DIMS = 1024
+# nemotron chat models are not routed by the free NV-API (404) — llama-3.3 is.
+DEFAULT_CHAT_MODEL = "meta/llama-3.3-70b-instruct"
 
 
 class NvidiaProvider:
@@ -36,7 +40,7 @@ class NvidiaProvider:
         api_key: str,
         base_url: str = DEFAULT_BASE_URL,
         chat_url: str = DEFAULT_CHAT_URL,
-        chat_model: str = "nvidia/llama-3.1-nemotron-70b-instruct",
+        chat_model: str = DEFAULT_CHAT_MODEL,
         retries: int = 3,
         backoff_seconds: tuple[float, ...] = (1.0, 2.0, 4.0),
         transport: httpx.AsyncBaseTransport | None = None,
@@ -50,9 +54,13 @@ class NvidiaProvider:
         self._transport = transport
 
     async def embed(
-        self, texts: list[str], *, batch_size: int = 32
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
     ) -> list[list[float]]:
-        """Embed texts in batches; order preserved (contracts §1)."""
+        """Embed texts in batches; order preserved (contracts §1).
+
+        `input_type` is required by nv-embedqa-e5-v5 (query|passage); symmetric
+        providers ignore it.
+        """
         if not texts:
             return []
         vectors: list[list[float]] = []
@@ -66,6 +74,7 @@ class NvidiaProvider:
                     provider_name="nvidia",
                     texts=batch,
                     embedding_dims=self.embedding_dims,
+                    extra_body={"input_type": input_type},
                     retries=self.retries,
                     backoff_seconds=self.backoff_seconds,
                     transport=self._transport,

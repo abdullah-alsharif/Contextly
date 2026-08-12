@@ -79,7 +79,7 @@ def test_factory_selects_fake_by_default() -> None:
 def test_factory_selects_nvidia_and_openrouter() -> None:
     nvidia = build_ai_provider(_settings(ai_provider="nvidia"))
     assert isinstance(nvidia, NvidiaProvider)
-    assert nvidia.embedding_model == "nvidia/bge-m3"
+    assert nvidia.embedding_model == "nvidia/nv-embedqa-e5-v5"
     assert nvidia.embedding_dims == 1024
 
     openrouter = build_ai_provider(_settings(ai_provider="openrouter"))
@@ -135,11 +135,29 @@ def test_nvidia_requests_shape_and_parses_order_preserved() -> None:
     assert len(received) == 2  # batched: [first, second] then [third]
     assert received[0].url == "https://integrate.api.nvidia.com/v1/embeddings"
     assert received[0].headers["Authorization"] == "Bearer test-key"
-    payload = {"model": "nvidia/bge-m3", "input": ["first", "second"]}
+    # nv-embedqa-e5-v5 is asymmetric: input_type is mandatory (query|passage).
+    payload = {
+        "model": "nvidia/nv-embedqa-e5-v5",
+        "input": ["first", "second"],
+        "input_type": "passage",
+    }
     assert json.loads(received[0].content) == payload
     # order preserved: batch 1 indices 0,1 then batch 2 index 0 (per-batch indices)
     assert vectors[0][0] == 1.0 and vectors[1][0] == 2.0 and vectors[2][0] == 1.0
     assert all(len(v) == 1024 for v in vectors)
+
+
+def test_nvidia_embed_forwards_query_input_type() -> None:
+    # Retrieval questions embed with input_type="query" (docs/ai-providers.md §2).
+    received: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        received.append(json.loads(request.content))
+        return httpx.Response(200, json=_ok_payload(["question?"]))
+
+    provider = _nvidia_provider(handler)
+    asyncio.run(provider.embed(["question?"], input_type="query"))
+    assert received[0]["input_type"] == "query"
 
 
 def test_nvidia_retries_5xx_then_surfaces_error() -> None:
@@ -363,7 +381,7 @@ def test_nvidia_generate_non_stream_parses_content() -> None:
     assert answer == "The refund period is 30 days."
     assert received["url"] == "https://integrate.api.nvidia.com/v1/chat/completions"
     assert received["payload"] == {
-        "model": "nvidia/llama-3.1-nemotron-70b-instruct",
+        "model": "meta/llama-3.3-70b-instruct",
         "messages": _MESSAGES,
         "stream": False,
     }

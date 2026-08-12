@@ -54,3 +54,30 @@ def test_general_rate_limit_defaults_match_docs() -> None:
     assert settings.rate_limit_general_per_minute == 120
     assert settings.rate_limit_chat_per_minute == 30
     assert settings.storage_signed_url_ttl_seconds == 300
+
+
+def test_create_app_refuses_local_storage_outside_dev_env() -> None:
+    # local storage is dev-only (docs/security.md §6).
+    settings = Settings(storage_provider="local", app_env="production")
+    with pytest.raises(RuntimeError, match="only allowed when APP_ENV=dev"):
+        create_app(settings=settings)
+
+
+def test_local_storage_ok_in_dev_env() -> None:
+    settings = Settings(storage_provider="local", app_env="dev")
+    app = create_app(settings=settings)
+    assert app.state.storage_provider.__class__.__name__ == "LocalStorageProvider"
+
+
+def test_log_level_must_be_a_valid_logging_level() -> None:
+    # Unknown LOG_LEVEL values fail at startup.
+    for bad in ("verbose", "TRACE", "", "0"):
+        with pytest.raises(ValueError, match="log_level"):
+            Settings(log_level=bad)
+
+
+def test_log_level_defaults_and_normalizes() -> None:
+    settings = Settings()
+    assert settings.log_level == "info"
+    assert Settings(log_level="DEBUG").log_level == "debug"
+    assert Settings(log_level=" Warning ").log_level == "warning"

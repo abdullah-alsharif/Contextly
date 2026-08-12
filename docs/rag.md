@@ -23,7 +23,7 @@ flowchart LR
 | Chunk overlap | ~50 tokens | Boundary resilience for sentences spanning cut points |
 | Top-K | 6 | Enough for good answers; small context; raised only if eval shows misses |
 | Similarity threshold | none (hard) | Rely on top-K + log scores; add a soft floor later after eval |
-| Embedding model | NVIDIA `bge-m3` (1024 dims) | Locked; vector dim must equal model output |
+| Embedding model | NVIDIA `nv-embedqa-e5-v5` (1024 dims; hosted API — `bge-m3` retired) | Vector dim must equal model output; asymmetric → `input_type` query/passage |
 | Distance | L2 (`vector_l2_ops`) | Keep consistent with `similarity = 1 - distance` in code |
 | `ef_search` | 40 | HNSW recall/speed trade-off |
 | Context size | ~6 chunks (~3k tokens) + system prompt | Fits comfortably in generation context window |

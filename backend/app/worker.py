@@ -115,6 +115,7 @@ async def _run(settings: Settings) -> None:
 
 def run() -> None:
     settings = get_settings()
+    logging.basicConfig(level=settings.log_level.upper())
     try:
         asyncio.run(_run(settings))
     except KeyboardInterrupt:
@@ -122,5 +123,4 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     run()

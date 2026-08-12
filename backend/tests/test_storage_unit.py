@@ -220,6 +220,7 @@ class _FakeSettings:
     storage_bucket = "documents"
     supabase_url = ""
     supabase_service_role_key = ""
+    app_env = "dev"
 
 
 def test_factory_selects_local() -> None:

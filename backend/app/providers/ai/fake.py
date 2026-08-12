@@ -44,7 +44,7 @@ class FakeProvider:
         return [rng.uniform(-1.0, 1.0) for _ in range(self.embedding_dims)]
 
     async def embed(
-        self, texts: list[str], *, batch_size: int = 32
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
     ) -> list[list[float]]:
         """Embed texts deterministically; order preserved (no-op on empty input)."""
         if not texts:

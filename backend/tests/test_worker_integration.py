@@ -727,7 +727,7 @@ class _FailingAI:
         self.message = message
 
     async def embed(
-        self, texts: list[str], *, batch_size: int = 32
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
     ) -> list[list[float]]:
         raise AIProviderError(
             self.message, provider="test-failing", status_code=self.status_code
@@ -882,5 +882,52 @@ def test_embed_idempotent_ready_no_reprocess(tmp_path: Path) -> None:
         assert row["status"] == "ready"
         assert row["retry_count"] == 0
         assert _chunk_embeddings(document_id) == embeddings_before  # no re-embed
+    finally:
+        _cleanup_document(document_id)
+
+
+def test_reprocess_replaces_stale_chunks_without_unique_violation(
+    tmp_path: Path,
+) -> None:
+    """A re-claimed document with leftover chunks reprocesses cleanly.
+
+    Regression: reprocessing a document whose chunks already exist hit
+    "duplicate key value violates unique constraint document_chunks_
+    document_id_chunk_index_key" and exhausted into failed. The pipeline must
+    clear prior chunks before inserting (docs/ingestion.md §3, idempotent
+    per document).
+    """
+    document_id = uuid.uuid4()
+    storage_path = f"{USER_A}/docs/{document_id}.pdf"
+    storage = LocalStorageProvider(root=tmp_path)
+    data = make_pdf(["Fresh  " * 115 + "page one", "Fresh  " * 115 + "page two"])
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
+    _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
+
+    try:
+        assert asyncio.run(_run_pipeline(document_id, storage)) == "ready"
+        first_chunks = _chunk_rows(document_id)
+        assert first_chunks
+
+        # Simulate a re-enqueue (e.g. manual reprocess like the backfill that
+        # triggered the regression): claim pool must re-claim the document.
+        with _admin() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "update documents set status = 'uploaded', lease_until = null "
+                    "where id = %s",
+                    (document_id,),
+                )
+            conn.commit()
+
+        assert asyncio.run(_run_pipeline(document_id, storage)) == "ready"
+        row = _document_row(document_id)
+        assert row["status"] == "ready"
+        assert row["status_error"] is None
+        second_chunks = _chunk_rows(document_id)
+        assert len(second_chunks) == len(first_chunks)  # replaced, not duplicated
+        assert _chunk_embeddings(document_id)  # vectors present
     finally:
         _cleanup_document(document_id)

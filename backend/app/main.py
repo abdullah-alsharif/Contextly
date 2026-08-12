@@ -5,6 +5,7 @@ infrastructure and stays at root (contracts/healthz.md, research.md D3). Auth
 configuration is validated at startup (fails loudly on unsafe modes).
 """
 
+import logging
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 
@@ -29,6 +30,13 @@ SERVICE_NAME = "contextly-backend"
 VERSION = "0.1.0"
 
 HealthProbe = Callable[[], bool]
+
+
+def _configure_logging(level: str) -> None:
+    """Apply the LOG_LEVEL knob to root + uvicorn loggers (idempotent)."""
+    logging.basicConfig(level=level.upper())
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).setLevel(level.upper())
 
 
 def probe_database(settings: Settings) -> bool:
@@ -66,6 +74,7 @@ def create_app(
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_settings.validate_auth()
+    _configure_logging(resolved_settings.log_level)
     resolved_ai = ai_provider or build_ai_provider(
         resolved_settings
     )  # fail fast on bad AI config (contracts/ai-provider.md §4)

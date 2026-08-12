@@ -194,7 +194,7 @@ class _FixedVectorProvider:
         self.vector = vector
 
     async def embed(
-        self, texts: list[str], *, batch_size: int = 32
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
     ) -> list[list[float]]:
         return [list(self.vector) for _ in texts]
 

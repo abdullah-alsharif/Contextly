@@ -35,26 +35,42 @@ flowchart LR
 
 | Var | Where | Notes |
 |---|---|---|
-| `SUPABASE_URL` | Vercel, Render | |
-| `SUPABASE_JWT_SECRET` | Render only | JWT verification |
+| `DATABASE_URL` | Render (web + worker) | runtime role (`contextly_app`, NOBYPASSRLS) |
+| `MIGRATION_DATABASE_URL` | Render pre-deploy only | migration connection (see §4); never the runtime role |
+| `SUPABASE_URL` | Render, Vercel | |
 | `SUPABASE_SERVICE_ROLE_KEY` | Render only | backend storage ops |
-| `DATABASE_URL` | Render | runtime role (RLS on) |
-| `STORAGE_PROVIDER=supabase` | Render | `local` for dev |
-| `AI_PROVIDER=nvidia` | Render | `openrouter` | `fake` |
+| `STORAGE_PROVIDER=supabase` | Render | `local` rejected when `APP_ENV != dev` (startup guard) |
+| `AI_PROVIDER=nvidia` | Render | `openrouter` \| `fake` (fake rejected when `APP_ENV != dev`) |
 | `NVIDIA_API_KEY` / `OPENROUTER_API_KEY` | Render | per provider |
-| `FRONTEND_URL` | Render | CORS allowlist |
-| `BACKEND_URL` | Vercel | server-side base URL |
-| `LOG_LEVEL`, `RATE_LIMIT_*` | both | ops knobs |
+| `AUTH_MODE=supabase` | Render | `dev` rejected when `APP_ENV != dev`; JWKS derived from `SUPABASE_URL` or via `SUPABASE_JWKS_URL` |
+| `CORS_ORIGINS` | Render | comma-separated allowlist; include `https://<app>.vercel.app` (the `FRONTEND_URL`) |
+| `APP_ENV=production` | Render, Vercel | unlocks the startup guards (settings validators) |
+| `LOG_LEVEL` | Render | `debug\|info\|warning\|error\|critical` (default `info`) |
+| `RATE_LIMIT_CHAT_PER_MINUTE`, `RATE_LIMIT_GENERAL_PER_MINUTE` | Render | ops knobs (defaults 30 / 120) |
+| `NEXT_PUBLIC_BACKEND_URL` | Vercel | server-side + client base URL (CSP `connect-src`) |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel | frontend Supabase client (anon key is public by design) |
+| `NEXT_PUBLIC_AUTH_MODE=supabase` | Vercel | switches the middleware from dev cookie to Supabase sessions |
+| `CHUNK_SIZE_TOKENS` | Render | NVIDIA hosted embeddings cap inputs at 512 tokens — use `400` (docs/ai-providers.md §2) |
 
 Never commit real values; keep `.env.example` in the repo, secrets in the hosting
-platforms' secret stores.
+platforms' secret stores. `render.yaml` marks every secret `sync: false` so it is
+filled in the Render dashboard/CLI only.
 
 ## 4. Migrations
 
 - SQL migration files in `infrastructure/migrations/` (numbered `0001_*.sql`, …).
-- Run via `alembic upgrade head` (or a 10-line runner) as a Render pre-deploy step.
+- Run via `python -m app.migrate` (Phase 0 runner; `alembic` is not used) as a Render
+  pre-deploy step (`render.yaml` `preDeployCommand`) or from an operator machine.
 - Never run migrations against Supabase with the runtime role — use the migration
-  connection (`postgres` role / SQL editor in dev only).
+  connection (`MIGRATION_DATABASE_URL`, a migration-capable role; the Supabase SQL
+  editor in dev). The runner prefers `MIGRATION_DATABASE_URL` over `DATABASE_URL`
+  and **fails loudly** when it is empty outside dev — DDL as the runtime role is
+  refused at the runner, not the database (deploy blocker, `app/migrate.py`).
+- Supabase specifics: migrations that create roles/run multi-statement files must use
+  a **session-mode** connection (direct port, `sslmode=require`), not the transaction
+  pooler. The migration files ship inside the backend image
+  (`backend/Dockerfile` copies `infrastructure/migrations/`), so the pre-deploy step
+  finds them with `migrations_dir` at its default.
 
 ## 5. CORS & production hardening
 
@@ -80,9 +96,92 @@ Prometheus endpoint on the backend if desired; otherwise counters in logs. See
 ## 8. Known free-tier pitfalls (plan for them)
 
 | Pitfall | Mitigation |
-|---|---|
+|---|---|---|
 | Supabase project pauses after ~7 days idle | Keep a cron hit (`/healthz`) from a free scheduler; or accept a "wake" delay and mention it |
 | Render free sleeps after ~15 min idle | Same cron approach; document expected cold start in README |
 | NVIDIA free endpoints change/rate-limit | `AI_PROVIDER` switch; cache embeddings per content hash in DB (optional later) |
 | Vercel serverless cold starts | Next.js API calls to Render are infrequent; acceptable |
 | Storage egress limits | PDFs ≤ 10 MB, low usage in demo; monitor dashboard |
+
+## 9. Deployment runbook ($0 stack)
+
+Repeatable from empty accounts; no tribal knowledge. Replace `<…>` with your values.
+`specs/012-production-deployment/tasks.md` tracks each step against the phase DoD.
+
+**0. Wake Supabase** — if the project exists and is paused, open it in the dashboard
+(it resumes on demand). A paused project fails migrations with a connection error.
+
+**1. Supabase project + storage**
+- Create a free project (or use an existing one); note the **project URL**, **anon
+  key**, and **service-role key** (Settings → API).
+- Storage: create a private bucket `documents` (defaults from `STORAGE_BUCKET`). Add a
+  policy so each user can read/write only their own folder `{user_id}/docs/*` — the
+  backend signs URLs server-side with the service-role key, so the bucket itself stays
+  private (docs/multi-tenancy.md §4, docs/security.md §3).
+- SQL editor (the migration connection; never the runtime role, §4): set a strong
+  password for the runtime role and a strong one for the migration role:
+  - Runtime role: `alter role contextly_app with password '<runtime-pw>';` (the role
+    is created by `0001_init.sql`).
+  - Migration role: use the `postgres` role connection; note the **session-mode
+    (direct) connection string** — `postgresql://postgres.<ref>:<db-pw>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require` does NOT work for migrations; use port **5432** direct (Settings → Database → Connection string, "Direct connection").
+
+**2. Migrations**
+- `MIGRATION_DATABASE_URL=<migration connection, session-mode>` + `python -m app.migrate`
+  from the operator machine (or let the Render pre-deploy step run it after step 4).
+- Verify: `schema_migrations` lists `0001_init.sql` … `0004_conversation_messages.sql`.
+
+**3. Runtime DB URL**
+- `DATABASE_URL=postgresql://contextly_app:<runtime-pw>@<db-host>:5432/postgres?sslmode=require`
+  (the NOBYPASSRLS runtime role — RLS is the enforcement boundary, docs/security.md §2).
+
+**4. Render (blueprint)**
+- Push this repo to GitHub; in Render, "New → Blueprint" and pick the repo — it reads
+  `render.yaml` (web `contextly-backend` + worker `contextly-worker`).
+- Fill the `sync: false` secrets for both services: `DATABASE_URL`, `MIGRATION_DATABASE_URL`,
+  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NVIDIA_API_KEY` (or switch
+  `AI_PROVIDER=openrouter` + its key).
+- Set `CORS_ORIGINS=https://<app>.vercel.app` once the Vercel project exists (step 5).
+- Deploy. The web service's `preDeployCommand` runs migrations; its health check is
+  `/healthz` (DB + AI-provider booleans, §5).
+
+**5. Vercel**
+- Import the repo (Git integration, Next.js preset). Add env:
+  `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `NEXT_PUBLIC_AUTH_MODE=supabase`, `NEXT_PUBLIC_BACKEND_URL=https://<backend>.onrender.com`.
+- Deploy `main`. Backfill `CORS_ORIGINS` on Render with the `*.vercel.app` URL and
+  redeploy.
+
+**6. Demo (eval) account**
+- Supabase dashboard → Authentication → Users → add a user (email/password) — this is
+  the demo account used by the verification checklist (§10).
+
+**7. Verify** — run the §10 checklist end-to-end.
+
+**8. Wake cron** — cron-job.org (or equivalent): GET `https://<backend>.onrender.com/healthz`
+every 14 min, 3 retries, 60 s timeout. This covers Render sleep + Supabase pause (§8).
+
+## 10. Post-deploy verification checklist
+
+Executed after every deployment; evidence recorded in
+`specs/012-production-deployment/checklists/deployment-verification.md`. The Phase 11
+DoD is met when every item passes (docs/roadmap.md Phase 11).
+
+| # | Check | Command / method | Pass |
+|---|---|---|---|
+| 1 | Health: DB + provider up | `curl -si https://<backend>.onrender.com/healthz` → `200` with `checks.database: true`, `checks.ai_provider: true` | |
+| 2 | No dev-mode settings | Render/Vercel env dashboards: `APP_ENV=production`, `AUTH_MODE=supabase`, `STORAGE_PROVIDER=supabase`, `AI_PROVIDER` real (nvidia/openrouter) | |
+| 3 | Guard proven | Temporarily set `STORAGE_PROVIDER=local` (or `AUTH_MODE=dev`) on Render → deploy fails with the named-variable error; restore | |
+| 4 | CORS from prod origin | Browser (prod domain) DevTools: `OPTIONS` preflight + credentialed GET to the backend → 2xx, `access-control-allow-origin` echoes the frontend origin | |
+| 5 | Signed-URL download | Logged in as the demo user, download a processed document → 200, content is the PDF, URL expires ≤ 5 min | |
+| 6 | Upload → ready | Demo user uploads a PDF (≤10 MB) → status `ready`; worker logs show claim → parse → embed → finalize | |
+| 7 | SSE chat with citations | Demo user chats → token deltas stream; assistant message lists source doc + page | |
+| 8 | Secrets in repo | `grep -rniE 'service_role|api_key|postgres://…' .` (excluding `.env*`) → no hits; `.env.example` has placeholders only | |
+| 9 | Eval gate | CI on `main` (or `make eval`): `recall@6 ≥ 0.85` green (docs/testing.md §6) | |
+| 10 | Runbook reproducible | A second operator follows §9 from empty accounts to a working demo | |
+
+**Wake cron (concrete):** a free scheduler (e.g. cron-job.org) GETs
+`https://<backend>.onrender.com/healthz` every ~14 minutes. Each hit wakes Render and
+runs the healthz DB probe, which also keeps the Supabase project active (a paused
+project fails the probe with a clear connection error — wake it via the dashboard
+before migrating/deploying). Expected after an idle spell: a few seconds of cold start
+on the first request; document this to demo users. See the §9 runbook, step 8.
