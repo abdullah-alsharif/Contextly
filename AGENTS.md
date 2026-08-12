@@ -56,11 +56,12 @@ make migrate   # apply infrastructure/migrations
 make test      # backend pytest
 ```
 
-Current task: **Phase 9** (security hardening) per `docs/roadmap.md` —
-spec/plan/tasks in `specs/010-security-hardening/`. Adds the 10-test multi-tenancy
-matrix (`backend/tests/security/test_multi_tenancy_matrix.py`, CI-gated 10/10),
-general per-user rate limiting (120 req/min, distinct from chat's 30), the
-`GET /documents/{id}/download-url` signed-URL endpoint (5 min TTL), upload/guard-rail
-tests, frontend security headers (+frame-ancestors), and a migrate step so the CI
-Postgres gets the schema. No migrations/schema changes; phases 0–8 code is untouched
-except router-level rate-limit wiring and the new download-url endpoint.
+Current task: **Phase 10** (RAG evaluation) per `docs/roadmap.md` —
+spec/plan/tasks in `specs/011-rag-evaluation/`. Adds the `eval/` harness
+(`eval/run_eval.py` + `eval/generate_documents.py` + `eval/embedding.py`), the
+committed seed corpus (`eval/documents/`), 60 fixture queries
+(`eval/datasets/qa.json`), a committed deterministic report
+(`eval/reports/rag-eval.md`), the CI gate `recall@6 ≥ 0.85` (hermetic lexical
+embeddings under `AI_PROVIDER=fake`, real embeddings opt-in), `eval/tests/`, and
+the `make eval` target. No retrieval/chunking/default changes — measuring only;
+tuning is Phase 12 (docs/testing.md §6).

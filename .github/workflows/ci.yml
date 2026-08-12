@@ -60,6 +60,22 @@ jobs:
           echo "matrix tests collected: ${count}"
           test "${count}" = "10"
           pytest tests/security/test_multi_tenancy_matrix.py -q
+      - name: RAG eval (hermetic gate, recall@6 ≥ 0.85)
+        # Phase 10 DoD (docs/roadmap.md): recall@6 ≥ 0.85 on the committed
+        # fixtures, gating BOTH the document and page-coverage variants
+        # (docs/testing.md §6 — page coverage drops to ~0.4 for content-blind
+        # ranking, so it carries the discriminating signal). Hermetic offline
+        # harness: deterministic lexical embeddings for AI_PROVIDER=fake, no
+        # DB/network/keys — the harness exit code carries the gate, and the
+        # eval unit tests re-check fixtures + determinism below.
+        working-directory: ${{ github.workspace }}
+        env:
+          APP_ENV: dev
+          AI_PROVIDER: fake
+        run: |
+          ruff check --config backend/pyproject.toml eval
+          python -m eval.run_eval --out eval/reports/rag-eval.md
+          python -m pytest eval/tests -q
 
   frontend:
     name: Frontend (tsc + eslint + next build)

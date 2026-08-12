@@ -1,0 +1,145 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 3 0 R >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+3 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R 9 0 R 11 0 R 13 0 R 15 0 R 17 0 R 19 0 R 21 0 R 23 0 R] /Count 10 >>
+endobj
+4 0 obj
+<< /Length 243 >>
+stream
+BT /F1 10 Tf 72 740 Td (Acme Supply Co. Data Security Policy. Effective January 1, 2026. This policy states how Acme) Tj ET
+BT /F1 10 Tf 72 725 Td (protects company data and customer data. Every employee is responsible for following it.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+6 0 obj
+<< /Length 223 >>
+stream
+BT /F1 10 Tf 72 740 Td (Passwords. Work accounts require a password of at least 12 characters and MFA. Passwords) Tj ET
+BT /F1 10 Tf 72 725 Td (rotate every 90 days. Never reuse a personal password on a work account.) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+8 0 obj
+<< /Length 212 >>
+stream
+BT /F1 10 Tf 72 740 Td (Phishing. Report suspicious email to security@acme.example. Never click links in unexpected) Tj ET
+BT /F1 10 Tf 72 725 Td (messages. Acme runs simulated phishing tests each quarter.) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+10 0 obj
+<< /Length 231 >>
+stream
+BT /F1 10 Tf 72 740 Td (Encryption. All company laptops are encrypted with full-disk encryption. Company data is) Tj ET
+BT /F1 10 Tf 72 725 Td (encrypted at rest and in transit. USB drives are not permitted for company data.) Tj ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 10 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+12 0 obj
+<< /Length 298 >>
+stream
+BT /F1 10 Tf 72 740 Td (Data classification. Acme uses three data classes: public, internal, and confidential.) Tj ET
+BT /F1 10 Tf 72 725 Td (Confidential data includes customer lists and unannounced products. Confidential data) Tj ET
+BT /F1 10 Tf 72 710 Td (requires the highest protection.) Tj ET
+endstream
+endobj
+13 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 12 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+14 0 obj
+<< /Length 304 >>
+stream
+BT /F1 10 Tf 72 740 Td (Remote access. Remote access requires the company VPN plus MFA. Work devices use a zero-) Tj ET
+BT /F1 10 Tf 72 725 Td (trust posture with least-privilege access by default. Personal devices are allowed only with) Tj ET
+BT /F1 10 Tf 72 710 Td (approved management software.) Tj ET
+endstream
+endobj
+15 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 14 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+16 0 obj
+<< /Length 289 >>
+stream
+BT /F1 10 Tf 72 740 Td (Incident reporting. Report any suspected breach within 1 hour to security@acme.example. Do) Tj ET
+BT /F1 10 Tf 72 725 Td (not discuss incidents outside the security team until approved. Acme protects reporters from) Tj ET
+BT /F1 10 Tf 72 710 Td (retaliation.) Tj ET
+endstream
+endobj
+17 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 16 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+18 0 obj
+<< /Length 205 >>
+stream
+BT /F1 10 Tf 72 740 Td (Clean desk. Lock screens when you step away from your desk. Remove sensitive documents from) Tj ET
+BT /F1 10 Tf 72 725 Td (desks overnight. Badges must be worn in the office.) Tj ET
+endstream
+endobj
+19 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 18 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+20 0 obj
+<< /Length 283 >>
+stream
+BT /F1 10 Tf 72 740 Td (Third parties. Vendors must sign a data processing agreement before accessing Acme data.) Tj ET
+BT /F1 10 Tf 72 725 Td (Vendor access is reviewed twice a year. Contractors complete the same security training as) Tj ET
+BT /F1 10 Tf 72 710 Td (employees.) Tj ET
+endstream
+endobj
+21 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 20 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+22 0 obj
+<< /Length 229 >>
+stream
+BT /F1 10 Tf 72 740 Td (Policy changes. Acme may update this policy at any time. Contact security@acme.example with) Tj ET
+BT /F1 10 Tf 72 725 Td (questions. Violations may result in disciplinary action, up to termination.) Tj ET
+endstream
+endobj
+23 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 612 792] /Contents 22 0 R /Resources << /Font << /F1 2 0 R >> >> >>
+endobj
+xref
+0 24
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000128 00000 n 
+0000000247 00000 n 
+0000000541 00000 n 
+0000000667 00000 n 
+0000000941 00000 n 
+0000001067 00000 n 
+0000001330 00000 n 
+0000001456 00000 n 
+0000001739 00000 n 
+0000001867 00000 n 
+0000002217 00000 n 
+0000002345 00000 n 
+0000002701 00000 n 
+0000002829 00000 n 
+0000003170 00000 n 
+0000003298 00000 n 
+0000003555 00000 n 
+0000003683 00000 n 
+0000004018 00000 n 
+0000004146 00000 n 
+0000004427 00000 n 
+trailer
+<< /Size 24 /Root 1 0 R >>
+startxref
+4555
+%%EOF

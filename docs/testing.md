@@ -91,6 +91,47 @@ Harness (`eval/run_eval.py`):
 The eval harness is written in Phase 4/5 (with chunking+embeddings), **not** deferred —
 it is the measurable proof that RAG works.
 
+### 6.1 Phase 10 realized harness
+
+Implemented in Phase 10 (`specs/011-rag-evaluation/`):
+
+- **Seed corpus** — `eval/documents/*.pdf`: 5 Acme policy PDFs generated
+  deterministically by `eval/generate_documents.py` (refund, shipping, benefits,
+  data security, HR handbook). Re-running the generator is byte-identical.
+- **Dataset** — `eval/datasets/qa.json`: 60 query pairs following the schema
+  above; each has an `expected_page`, `answer_contains` facts that the harness
+  verifies sit on that page (drift fails the run), and a `hard_negative_document`.
+- **Harness** — `eval/run_eval.py`: reads the PDFs, chunks with the locked
+  Phase-5 defaults (chunk 500 / overlap 50 tokens, docs/rag.md §2), embeds via
+  the configured provider, ranks each query over top-K=6, and computes
+  `recall@6`, `MRR`, page-coverage variants, plus rule-based answer checks on
+  full-pipeline runs (`answer_contains` in the generated answer → correctness,
+  and in the retrieved excerpts → grounding).
+- **Hermetic mode** — the fake provider's embeddings are content-blind
+  (docs/ai-providers.md §2), so `AI_PROVIDER=fake` swaps in the deterministic
+  lexical embedder `eval/embedding.py` (hashed word unigrams+bigrams, corpus IDF
+  — stdlib only). CI uses this and needs no DB/network/keys. Real embeddings are
+  the documented opt-in: `AI_PROVIDER=nvidia|openrouter` (+ keys) locally.
+- **Cross-platform determinism** — the embedder computes its IDF log with
+  IEEE-754 basic arithmetic only (`frexp` + odd-power series, `_log`), never
+  the platform libm, so vectors are bit-identical on every IEEE-conformant
+  machine and reports re-run byte-identical. A golden sha256 of the committed
+  corpus vectors in `eval/tests` pins this; CI runs the same check on glibc.
+- **Gate** — `recall@6 ≥ 0.85` (document *and* page-coverage variants) is the
+  harness exit-code gate (docs/roadmap.md Phase 10 DoD) and is enforced in CI.
+  On this 15-chunk corpus doc-level recall@6 sits near the content-blind random
+  baseline (~0.8–0.9) while page coverage drops to ~0.4, so gating both keeps
+  broken embedding/retrieval from slipping through. Report is committed to
+  `eval/reports/rag-eval.md` and regenerated deterministically.
+- **Run** — `make eval` (or `PYTHONPATH=backend python3 -m eval.run_eval
+  --out eval/reports/rag-eval.md`); unit tests live in `eval/tests/`.
+- **Scope (known limits)** — the harness is an offline upper bound on retrieval:
+  it ranks with exact squared-L2 over all corpus chunks (mirroring the product's
+  pgvector `embedding <-> query`, docs/rag.md §2), so it does not exercise the
+  HNSW/ef_search approximation, conversation-document selection, or tenant
+  scoping of `search_ready_documents`. It measures the chunking + embedding +
+  ranking chain, which is exactly what Phase 12 tunes.
+
 ## 7. Frontend tests
 
 - Unit: chat reducer/stream-assembly logic, sources rendering, formatting.
