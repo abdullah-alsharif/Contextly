@@ -24,6 +24,7 @@ from app.providers.storage.base import StorageProvider
 from app.schemas.document import DocumentOut, DownloadUrlOut
 from app.services.documents import (
     DocumentNotFoundError,
+    DuplicateDocumentError,
     InvalidUploadError,
     ReprocessNotAllowedError,
     SignedUrlError,
@@ -69,12 +70,20 @@ async def _read_upload(file: UploadFile, settings: Settings) -> bytes:
 @router.post("", response_model=DocumentOut, status_code=201)
 async def upload_document(
     file: UploadFile = File(...),
+    replace: bool = False,
     identity: Identity = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     storage: StorageProvider = Depends(get_storage_provider),
 ) -> dict[str, object]:
-    """Upload a validated PDF and return the document with status 'uploaded'."""
+    """Upload a validated PDF and return the document with status 'uploaded'.
+
+    Duplicate policy (docs/api.md §2): an active row with the same filename
+    → 409 carrying the existing id in `X-Existing-Document-Id`. With
+    `?replace=true` the old document is marked 'superseded' (chunks kept until
+    the replacement resolves, docs/ingestion.md §7) and the new upload is
+    processed normally.
+    """
     try:
         data = await _read_upload(file, settings)
         return await create_document(
@@ -85,11 +94,17 @@ async def upload_document(
             filename=file.filename or "",
             content_type=file.content_type or "",
             data=data,
+            replace=replace,
         )
     except InvalidUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UploadTooLargeError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except DuplicateDocumentError as exc:
+        headers = {}
+        if exc.existing_id is not None:
+            headers["X-Existing-Document-Id"] = str(exc.existing_id)
+        raise HTTPException(status_code=409, detail=str(exc), headers=headers) from exc
     except UploadFailedError as exc:
         logger.error("upload failed for user %s: %s", identity.user_id, exc)
         raise HTTPException(
@@ -99,7 +114,9 @@ async def upload_document(
 
 @router.get("", response_model=list[DocumentOut])
 async def get_documents(
-    status: Literal["uploaded", "processing", "ready", "failed", "deleted"]
+    status: Literal[
+        "uploaded", "processing", "ready", "failed", "deleted", "superseded"
+    ]
     | None = None,
     identity: Identity = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

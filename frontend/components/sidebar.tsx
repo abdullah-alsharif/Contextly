@@ -3,14 +3,13 @@
 // Sidebar — mirrors prototypes/chat.html SideNavBar: bg-surface shell,
 // avatar brand header, primary CTA with shadow, active nav item with fill
 // icon + left accent, Recent list, user chip with sign-out.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { listConversations, signOutLocally, type Conversation } from "@/lib/api-client";
 
 const NAV_ITEMS = [
   { href: "/documents", label: "Documents", icon: "description" },
-  { href: "/chat", label: "Chat", icon: "forum" },
   { href: "/settings", label: "Settings", icon: "settings" },
 ];
 
@@ -18,6 +17,12 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [recent, setRecent] = useState<Conversation[]>([]);
   const [email, setEmail] = useState<string>("");
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const confirmRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (confirmSignOut) confirmRef.current?.focus({ preventScroll: true });
+  }, [confirmSignOut]);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,8 +44,6 @@ export default function Sidebar() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const chatActive = pathname.startsWith("/chat");
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-outline-variant bg-surface py-stack-md px-stack-sm md:flex">
@@ -66,7 +69,7 @@ export default function Sidebar() {
 
       <nav className="flex flex-1 flex-col gap-1" aria-label="Main">
         {NAV_ITEMS.map((item) => {
-          const active = item.href === "/chat" ? chatActive : pathname.startsWith(item.href);
+          const active = pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}
@@ -74,7 +77,7 @@ export default function Sidebar() {
               aria-current={active ? "page" : undefined}
               className={`flex items-center gap-3 rounded-lg px-stack-sm py-2 transition-colors duration-200 ${
                 active
-                  ? "border-r-2 border-secondary bg-surface-container-low font-bold text-secondary"
+                  ? "bg-surface-container-low font-bold text-secondary"
                   : "text-on-surface-variant hover:bg-surface-container"
               }`}
             >
@@ -117,15 +120,54 @@ export default function Sidebar() {
             <span className="material-symbols-outlined fill text-sm text-on-secondary">person</span>
           </span>
           <p className="min-w-0 flex-1 truncate text-label-sm text-on-surface">{email || "Signed in"}</p>
-          <button
-            type="button"
-            onClick={() => void signOutLocally()}
-            title="Sign out"
-            className="rounded p-1 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-secondary"
-          >
-            <span className="material-symbols-outlined text-sm">logout</span>
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setConfirmSignOut(true)}
+              title="Sign out"
+              aria-label="Sign out"
+              aria-expanded={confirmSignOut}
+              className="rounded p-1 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-secondary"
+            >
+              <span className="material-symbols-outlined text-sm">logout</span>
+            </button>
+            {confirmSignOut && (
+              <div
+                ref={confirmRef}
+                tabIndex={-1}
+                role="alertdialog"
+                aria-label="Confirm sign out"
+                className="dialog-in absolute bottom-full right-0 z-10 mb-2 w-52 rounded-xl border border-outline-variant bg-surface p-3 shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1)] outline-none"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setConfirmSignOut(false);
+              }}
+            >
+              <p className="font-display text-label-sm font-medium text-on-surface">
+                Sign out of Contextly?
+              </p>
+              <p className="mt-0.5 text-label-sm text-on-surface-variant">
+                You&apos;ll need to sign in again to access your documents.
+              </p>
+              <div className="mt-2.5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmSignOut(false)}
+                  className="rounded-lg px-3 py-1.5 font-display text-label-sm text-on-surface-variant transition-colors hover:bg-surface-container"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void signOutLocally()}
+                  className="rounded-lg bg-secondary px-3 py-1.5 font-display text-label-sm text-on-secondary transition-colors hover:bg-secondary/90"
+                >
+                  Sign out
+                </button>
+              </div>
+            </div>
+          )}
         </div>
+      </div>
       </div>
     </aside>
   );

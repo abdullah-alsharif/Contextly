@@ -14,7 +14,8 @@ export type DocumentStatus =
   | "processing"
   | "ready"
   | "failed"
-  | "deleted";
+  | "deleted"
+  | "superseded";
 
 export interface Document {
   id: string;
@@ -69,6 +70,17 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
     this.status = status;
+  }
+}
+
+/** A 409 from the upload endpoint: an active file with the same name exists.
+ * `existingId` lets the UI offer replace-vs-rename (docs/api.md §2). */
+export class DuplicateDocumentError extends ApiError {
+  readonly existingId: string | null;
+  constructor(message: string, existingId: string | null) {
+    super(409, message);
+    this.name = "DuplicateDocumentError";
+    this.existingId = existingId;
   }
 }
 
@@ -146,6 +158,7 @@ export function listDocuments(): Promise<Document[]> {
 export async function uploadDocument(
   file: File,
   onProgress?: (fraction: number) => void,
+  options?: { replace?: boolean },
 ): Promise<Document> {
   if (file.type !== "application/pdf" || !file.name.toLowerCase().endsWith(".pdf")) {
     throw new ApiError(400, "PDF files only. Choose a file ending in .pdf.");
@@ -160,7 +173,10 @@ export async function uploadDocument(
 
   const result = await new Promise<Document>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${BACKEND_URL}/api/v1/documents`);
+    xhr.open(
+      "POST",
+      `${BACKEND_URL}/api/v1/documents${options?.replace ? "?replace=true" : ""}`,
+    );
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {
@@ -184,6 +200,13 @@ export async function uploadDocument(
         return;
       }
       const message = detailFrom(body, `Upload failed (${xhr.status}).`);
+      if (xhr.status === 409) {
+        const existingId = xhr.getResponseHeader("X-Existing-Document-Id");
+        reject(
+          new DuplicateDocumentError(message, existingId ? existingId : null),
+        );
+        return;
+      }
       reject(new ApiError(xhr.status, friendlyError(xhr.status, message)));
     };
     xhr.onerror = () => reject(new ApiError(0, "Network error — check your connection."));

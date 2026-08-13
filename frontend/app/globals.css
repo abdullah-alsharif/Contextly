@@ -71,3 +71,20 @@ body {
     opacity: 0.9;
   }
 }
+
+/* Duplicate dialog entrance (frontend-design §2) — motion-safe rise. */
+@keyframes dialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .dialog-in {
+    animation: dialogIn 220ms ease-out;
+  }
+}

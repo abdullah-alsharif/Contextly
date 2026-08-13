@@ -106,6 +106,7 @@ def test_document_status_enum_labels(conn: psycopg.Connection) -> None:
         "ready",
         "failed",
         "deleted",
+        "superseded",
     }
 
 

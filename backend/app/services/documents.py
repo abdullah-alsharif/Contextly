@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -33,8 +34,8 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 _INSERT_DOCUMENT = text(
     """
-    insert into documents (id, user_id, filename, storage_path, file_size_bytes, mime_type)
-    values (:id, :user_id, :filename, :storage_path, :file_size_bytes, :mime_type)
+    insert into documents (id, user_id, filename, storage_path, file_size_bytes, mime_type, replaces_document_id)
+    values (:id, :user_id, :filename, :storage_path, :file_size_bytes, :mime_type, :replaces_document_id)
     returning id, filename, status, file_size_bytes, total_chunks, status_error,
               created_at, updated_at
     """
@@ -94,6 +95,30 @@ _REPROCESS = text(
     """
 )
 
+_FIND_ACTIVE_DUPLICATE = text(
+    """
+    select id, filename
+    from documents
+    where user_id = :user_id and filename = :filename
+      and deleted_at is null and status <> 'superseded'
+    order by created_at asc
+    limit 1
+    """
+)
+
+_SUPERSEDE = text(
+    """
+    update documents
+    set status = 'superseded',
+        superseded_from = status,  -- RHS is the pre-replace status
+        lease_until = null,
+        updated_at = now()
+    where id = :document_id and user_id = :user_id
+      and deleted_at is null and status <> 'superseded'
+    returning id
+    """
+)
+
 _PURGE_CHUNKS = text("delete from document_chunks where document_id = :document_id")
 
 
@@ -121,6 +146,18 @@ class ReprocessNotAllowedError(Exception):
     """Document exists but is not in a reprocessable state (→ 400)."""
 
 
+class DuplicateDocumentError(Exception):
+    """An active document with the same filename already exists (→ 409).
+
+    Carries the existing row's id so callers can offer replace-vs-rename
+    (docs/api.md §2 duplicate handling).
+    """
+
+    def __init__(self, existing_id: uuid.UUID | None, message: str) -> None:
+        self.existing_id = existing_id
+        super().__init__(message)
+
+
 def sanitize_filename(filename: str) -> str:
     """Strip path components + control chars; display name only (docs/security.md §3)."""
     name = Path(filename.replace("\\", "/")).name
@@ -137,8 +174,15 @@ async def create_document(
     filename: str,
     content_type: str,
     data: bytes,
+    replace: bool = False,
 ) -> dict[str, Any]:
-    """Validate, persist, and store an uploaded document (contracts/documents.md §2)."""
+    """Validate, persist, and store an uploaded document (docs/ingestion.md §5).
+
+    An active row with the same (user_id, filename) is either superseded
+    (`replace=True`) or rejected with DuplicateDocumentError (409). The partial
+    unique index documents_active_filename_idx closes the parallel-upload race:
+    a concurrent insert surfaces as IntegrityError → 409.
+    """
     display_name = sanitize_filename(filename)
     if not display_name:
         raise InvalidUploadError("filename is missing or invalid")
@@ -155,21 +199,39 @@ async def create_document(
             f"file exceeds the {settings.upload_max_bytes} byte upload limit"
         )
 
+    if replace:
+        replaced_id = await supersede_active_duplicates(db, identity, display_name)
+    else:
+        duplicate = await find_active_duplicate(db, identity, display_name)
+        if duplicate is not None:
+            raise DuplicateDocumentError(
+                duplicate["id"],
+                f'A file named "{display_name}" is already in your library',
+            )
+        replaced_id = None
+
     document_id = uuid.uuid4()
     storage_path = f"{identity.user_id}/docs/{document_id}.pdf"
     validate_key(storage_path, identity.user_id)
 
-    result = await db.execute(
-        _INSERT_DOCUMENT,
-        {
-            "id": str(document_id),
-            "user_id": str(identity.user_id),
-            "filename": display_name,
-            "storage_path": storage_path,
-            "file_size_bytes": len(data),
-            "mime_type": "application/pdf",
-        },
-    )
+    try:
+        result = await db.execute(
+            _INSERT_DOCUMENT,
+            {
+                "id": str(document_id),
+                "user_id": str(identity.user_id),
+                "filename": display_name,
+                "storage_path": storage_path,
+                "file_size_bytes": len(data),
+                "mime_type": "application/pdf",
+                "replaces_document_id": str(replaced_id) if replaced_id else None,
+            },
+        )
+    except IntegrityError as exc:
+        raise DuplicateDocumentError(
+            None,
+            f'A file named "{display_name}" is already in your library',
+        ) from exc
     row = result.one()
 
     try:
@@ -182,6 +244,49 @@ async def create_document(
         raise UploadFailedError("upload failed") from exc
 
     return _serialize(row)
+
+
+async def find_active_duplicate(
+    db: AsyncSession,
+    identity: Identity,
+    filename: str,
+) -> dict[str, Any] | None:
+    """Return an active (non-deleted, non-superseded) row with the same name."""
+    result = await db.execute(
+        _FIND_ACTIVE_DUPLICATE,
+        {"user_id": str(identity.user_id), "filename": filename},
+    )
+    row = result.one_or_none()
+    return None if row is None else {"id": row.id, "filename": row.filename}
+
+
+async def supersede_active_duplicates(
+    db: AsyncSession,
+    identity: Identity,
+    filename: str,
+) -> uuid.UUID | None:
+    """Mark every active row with this name 'superseded' and return the last id.
+
+    The chunk purge is deferred: the replace resolution trigger (migration
+    0005) purges the old chunks when the replacement becomes 'ready' and
+    restores the old status when it 'fails' or is deleted (docs/ingestion.md
+    §7). Runs in the caller's transaction alongside the replacement insert, so
+    a failed upload (storage error) rolls the supersede back.
+    """
+    replaced: uuid.UUID | None = None
+    while True:
+        result = await db.execute(
+            _FIND_ACTIVE_DUPLICATE,
+            {"user_id": str(identity.user_id), "filename": filename},
+        )
+        row = result.one_or_none()
+        if row is None:
+            return replaced
+        await db.execute(
+            _SUPERSEDE,
+            {"document_id": str(row.id), "user_id": str(identity.user_id)},
+        )
+        replaced = row.id
 
 
 async def list_documents(

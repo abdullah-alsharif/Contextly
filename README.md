@@ -59,6 +59,8 @@ stateDiagram-v2
   processing --> ready : parse + chunk + embed + persist
   processing --> failed : parse/embed error
   failed --> processing : retry (max 3, backoff)
+  ready --> superseded : POST /documents?replace=true (older version replaced)
+  failed --> superseded : POST /documents?replace=true (older version replaced)
   ready --> deleted : DELETE /documents (soft delete + chunk purge)
   failed --> deleted : DELETE /documents
 ```

@@ -92,7 +92,8 @@ create table profiles (
   updated_at timestamptz not null default now()
 );
 
-create type document_status as enum ('uploaded', 'processing', 'ready', 'failed', 'deleted');
+create type document_status as enum
+  ('uploaded', 'processing', 'ready', 'failed', 'deleted', 'superseded');
 
 create table documents (
   id              uuid primary key default gen_random_uuid(),
@@ -111,6 +112,15 @@ create table documents (
 
 create index documents_user_idx on documents (user_id);
 create index documents_user_status_idx on documents (user_id, status) where deleted_at is null;
+
+-- Phase 12 dedupe (docs/ingestion.md §5): at most one active row per
+-- (user_id, filename). 'superseded' and deleted rows don't count as active,
+-- so a name is reusable once the version holding it is replaced or removed.
+-- (Migration 0005 names the pre-existing statuses because a value added to
+-- an enum is only usable after its transaction commits.)
+create unique index documents_active_filename_idx
+  on documents (user_id, filename)
+  where deleted_at is null and status in ('uploaded', 'processing', 'ready', 'failed');
 
 create table document_chunks (
   id          uuid primary key default gen_random_uuid(),
@@ -172,6 +182,16 @@ Notes:
 - `profiles` is the tenant table. `auth.users` is provided by Supabase Auth in MVP.
 - `documents.deleted_at` supports soft delete (hide + remove from search). Chunks are
   hard-deleted by the API when a document is deleted.
+- `documents.status = 'superseded'` marks a replaced version (Phase 12): the row
+  stays in the docs table but is excluded from retrieval/context/worker claims.
+  Replace is reversible (docs/ingestion.md §7): `superseded_from` remembers the
+  pre-replace status and `replaces_document_id` links a replacement to the row
+  it superseded (migration 0005, index `documents_replaces_idx`). The
+  `documents_replace_resolution` trigger (migration 0005) finalizes the
+  supersede (chunk purge) when a replacement reaches `ready`, and restores the
+  old status + chunks when it `fails` (the failed row then leaves the active
+  set) or is deleted — so the active-filename index always allows exactly one
+  active row per name.
 - No `updated_at` on chunks — immutable after write; chunk metadata edits are re-inserts.
 
 ### Local-dev auth shim & runtime role

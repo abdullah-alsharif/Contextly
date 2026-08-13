@@ -12,6 +12,7 @@
 | Top-K fixed 6, no threshold | Some irrelevant chunks enter context | Deterministic behavior; scores logged for future tuning |
 | Single embedding model locked (1024 dims) | Model-swap = migration + re-embed | pgvector index stability; no cross-model searches |
 | Reprocess only for `failed` docs | `ready` docs can't re-index after a tuning change | Failed-doc recovery without accidental re-embedding of healthy docs |
+| Filename-based dedupe | Same name from a different source (different content) can't coexist | One canonical active version per name; reversible update + rename keeps it honest |
 | $0 deployment | Cold starts, pauses, provider flakiness | Zero cost, truthful demo story |
 | Soft delete only for documents | Hard-delete semantics slightly fuzzy | Conversation source snapshots stay consistent |
 

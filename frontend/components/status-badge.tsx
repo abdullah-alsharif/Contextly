@@ -8,6 +8,7 @@ const TONES: Record<DocumentStatus, string> = {
   uploaded: "bg-surface-container-high text-on-surface-variant",
   failed: "bg-error-container text-error",
   deleted: "bg-surface-variant text-on-surface-variant",
+  superseded: "bg-tertiary-fixed text-on-tertiary-fixed-variant",
 };
 
 const LABELS: Record<DocumentStatus, string> = {
@@ -16,6 +17,7 @@ const LABELS: Record<DocumentStatus, string> = {
   uploaded: "Queued",
   failed: "Failed",
   deleted: "Deleted",
+  superseded: "Outdated",
 };
 
 export default function StatusBadge({
@@ -38,6 +40,15 @@ export default function StatusBadge({
       {status === "failed" && (
         <span className="material-symbols-outlined text-sm" aria-hidden="true">
           error
+        </span>
+      )}
+      {status === "superseded" && (
+        <span
+          className="material-symbols-outlined text-sm"
+          aria-hidden="true"
+          title="Replaced by a newer upload"
+        >
+          history_toggle_off
         </span>
       )}
       {LABELS[status]}

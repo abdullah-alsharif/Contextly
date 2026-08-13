@@ -11,11 +11,16 @@ stateDiagram-v2
   failed --> processing : retry (max 3, backoff) — admin/manual only in practice
   failed --> uploaded : PATCH /documents/{id}/reprocess (manual, chunks purged)
   uploaded --> failed : worker crash without recovery
+  ready --> superseded : POST /documents?replace=true (older version replaced)
+  failed --> superseded : POST /documents?replace=true (older version replaced)
   ready --> deleted : DELETE /documents (soft delete + chunk purge)
   failed --> deleted : DELETE /documents
 ```
 
-States are stored in `documents.status` (`uploaded | processing | ready | failed | deleted`).
+States are stored in `documents.status`
+(`uploaded | processing | ready | failed | superseded | deleted`). `superseded`
+rows remain listed in the docs table ("Outdated") but are excluded from
+retrieval, conversation context, and worker claims (docs/database.md).
 
 ## 2. Synchronous vs asynchronous
 
@@ -94,9 +99,10 @@ flowchart LR
 | Supported types | `application/pdf` only (MVP) |
 | Max file size | 10 MB (validated at API + enforced by storage policy) |
 | Max pages | None hard-coded; practical guard ~200 pages → soft warning (skip for MVP) |
-| Duplicate files | No strict dedupe; uploading the same file twice creates two documents. Output-path collision is avoided because paths embed `document_id` |
+| Duplicate files | Per (user, filename) dedupe: an upload colliding with an active row → `409` (docs/api.md §2). The client offers **update** (`POST /documents?replace=true`) or upload under a **new name** (client pre-fills a suggested `name-2.pdf`). Update is reversible: the old row is marked `superseded` immediately (leaves the chat corpus, stays in the table) but keeps its chunks and remembers its previous status; if the replacement reaches `ready` the supersede is finalized (chunks purged), and if it `fails` or is deleted the old document is restored to its previous status (migration 0005 trigger, docs/database.md). The partial unique index `documents_active_filename_idx` enforces this against parallel-upload races |
 | Document deletion | `DELETE /documents/{id}` → soft-delete row + delete chunks + delete file from storage. Conversations which referenced the doc remain, and their retrieval filter simply excludes the missing doc |
 | Re-indexing | `PATCH /documents/{id}/reprocess` re-queues a `failed` document: status → `uploaded`, chunks purged, counters cleared — the existing worker re-runs the exact same pipeline (docs/api.md §2). Reprocessing `ready` documents stays out of MVP scope |
+| Replace uploads | `POST /documents?replace=true` marks the old version `superseded` (previous status kept in `superseded_from`, chunks kept) and inserts the replacement with `replaces_document_id` linking back. The `documents_replace_resolution` trigger (migration 0005) resolves the outcome atomically with the worker's transaction: replacement `ready` → old finalized (superseded, chunks purged); replacement `failed` → the failed row leaves the active set, old restored to `superseded_from`; replacement deleted before resolving → old restored the same way |
 | Partial failures | Failures are per-document (parse/embed). Chunks are inserted in one transaction at step 5 → an embedding failure leaves the doc `failed` with no half-written chunks. If a document has zero valid pages, treat as parse failure |
 | Retry | Max 3 attempts, exponential backoff (1s → 5s → 30s), then `failed` |
 

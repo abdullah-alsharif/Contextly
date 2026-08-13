@@ -28,7 +28,8 @@ the backend only validates JWTs. The backend exposes `/auth/me` for the profile.
 
 | Method | URL | Body | Response | Errors |
 |---|---|---|---|---|
-| POST | `/documents` | `multipart/form-data`: `file` | `201 {document}` | 400 (not pdf), 413 (too large), 401 |
+| POST | `/documents` | `multipart/form-data`: `file` | `201 {document}` | 400 (not pdf), 409 (duplicate name), 413 (too large), 401 |
+| POST | `/documents?replace=true` | `multipart/form-data`: `file` | `201 {document}` | 400, 413, 401 |
 | GET | `/documents` | – | `200 [{document}]` (status filter optional `?status=`) | 401 |
 | GET | `/documents/{id}` | – | `200 {document, processing: {...}}` | 404 |
 | DELETE | `/documents/{id}` | – | `204` | 404 |
@@ -59,6 +60,21 @@ document: status → `uploaded`, `retry_count`/`status_error`/`total_chunks`
 cleared, chunks purged (same transaction) and the existing worker picks it up
 (docs/ingestion.md §7). Non-`failed` documents → `400`; the 404 rules are
 unchanged (docs/security.md §2).
+
+**Duplicate handling:** uploading a filename already held by an active
+(non-deleted, non-superseded) document → `409` with the existing row's id in
+the `X-Existing-Document-Id` header. `POST /documents?replace=true` instead
+supersedes that old document (status `superseded`, row kept in the docs table)
+and processes the new upload normally; a replace with no duplicate is a plain
+upload. The partial unique index (user_id, filename) closes parallel-upload
+races — the loser gets the same `409`.
+
+Replace is **reversible** (docs/ingestion.md §7): the old document's chunks
+stay in place and its previous status is remembered (`superseded_from`) while
+the replacement processes. If the replacement reaches `ready`, the old version
+is finalized as `superseded` (chunks purged); if it becomes `failed` or is
+deleted first, the old document is restored to its previous status and remains
+fully usable — the failed replacement row itself leaves the active set.
 
 ## 3. Conversations
 
@@ -138,6 +154,7 @@ Explicitly, there is **no** static file-serving endpoint; signed URLs only.
 | 401 | missing/invalid/expired JWT |
 | 404 | resource not found or not owned (deliberately ambiguous) |
 | 400 | business rule violation (wrong type, no docs selected) |
+| 409 | duplicate filename on upload (`X-Existing-Document-Id` header) |
 | 413 | upload too large |
 | 422 | validation failure (schema, question too long) |
 | 429 | rate limited (see [security.md](security.md)) |

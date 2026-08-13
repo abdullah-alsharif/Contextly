@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   deleteDocument,
+  DuplicateDocumentError,
   listDocuments,
   reprocessDocument,
   uploadDocument,
@@ -75,19 +76,29 @@ export function useDocuments() {
   }, [documents, refresh]);
 
   const upload = useCallback(
-    async (file: File, onProgress?: (fraction: number) => void): Promise<UploadOutcome> => {
+    async (
+      file: File,
+      onProgress?: (fraction: number) => void,
+      options?: { replace?: boolean },
+    ): Promise<UploadOutcome> => {
       setError(null);
       try {
-        const document = await uploadDocument(file, onProgress);
+        const document = await uploadDocument(file, onProgress, options);
         setDocuments((rows) => [document, ...rows.filter((row) => row.id !== document.id)]);
+        if (options?.replace) {
+          // The superseded old row flips to "Outdated" — re-fetch to show it.
+          void refresh(true);
+        }
         return { ok: true, document };
       } catch (err) {
+        // Duplicates get their own UI in the dropzone — let them propagate.
+        if (err instanceof DuplicateDocumentError) throw err;
         const message = err instanceof Error ? err.message : "Upload failed. Please try again.";
         setError(message);
         return { ok: false, error: message };
       }
     },
-    [],
+    [refresh],
   );
 
   const remove = useCallback(

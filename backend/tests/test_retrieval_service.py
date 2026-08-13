@@ -281,6 +281,54 @@ def test_ranks_hits_by_similarity_with_full_metadata() -> None:
         _cleanup(USER_A)
 
 
+def test_superseded_documents_are_excluded_from_retrieval() -> None:
+    """A replaced (superseded) document never surfaces in chat retrieval.
+
+    docs/ingestion.md §7: after a replace-upload the old row keeps its place in
+    the docs table but leaves the RAG corpus. The status enum is the guard
+    here — same guarantee the chunks purge provides at the storage layer.
+    """
+    _seed_user(USER_A)
+    doc_id = uuid.uuid4()
+    conversation_id = uuid.uuid4()
+    try:
+        _seed_document(doc_id, USER_A, filename="refund-policy.pdf")
+        _seed_conversation(conversation_id, USER_A)
+        _link(conversation_id, doc_id)
+        _seed_chunk(uuid.uuid4(), doc_id, index=0, content="refund period", vector=_vec(1.0))
+
+        before = asyncio.run(
+            _search(
+                user=USER_A,
+                conversation_id=conversation_id,
+                question="refund?",
+                provider=_query_vector(1.0),
+            )
+        )
+        assert [hit.document_id for hit in before] == [doc_id]
+
+        with _admin() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "update documents set status = 'superseded', total_chunks = null "
+                    "where id = %s",
+                    (doc_id,),
+                )
+            conn.commit()
+
+        after = asyncio.run(
+            _search(
+                user=USER_A,
+                conversation_id=conversation_id,
+                question="refund?",
+                provider=_query_vector(1.0),
+            )
+        )
+        assert after == []
+    finally:
+        _cleanup(USER_A)
+
+
 def test_default_top_k_is_six_and_override_honored() -> None:
     _seed_user(USER_A)
     doc_id = uuid.uuid4()

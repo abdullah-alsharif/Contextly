@@ -5,18 +5,13 @@
 
 import { useMemo } from "react";
 import type { Document } from "@/lib/api-client";
+import { formatBytes } from "@/lib/format";
 
 function fileIcon(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   if (ext === "pdf") return "picture_as_pdf";
   if (["txt", "md", "csv", "json"].includes(ext)) return "description";
   return "text_snippet";
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 export default function ContextPanel({

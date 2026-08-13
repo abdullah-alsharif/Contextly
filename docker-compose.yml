@@ -82,6 +82,12 @@ services:
     build: ./frontend
     environment:
       NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8000}
+    volumes:
+      - ./frontend/app:/app/app
+      - ./frontend/components:/app/components
+      - ./frontend/lib:/app/lib
+      - ./frontend/middleware.ts:/app/middleware.ts
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts
     ports: ["3000:3000"]
     depends_on:
       - backend

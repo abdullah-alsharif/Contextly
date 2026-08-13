@@ -125,6 +125,24 @@ def cleanup() -> None:
         conn.commit()
 
 
+@pytest.fixture(autouse=True)
+def clean_documents_before_each_test() -> None:
+    """Independent per-test state (docs/testing.md §1 isolation).
+
+    The Phase 12 dedupe policy (migration 0005) forbids two active rows with
+    the same (user_id, filename), so rows left behind by an earlier test would
+    409-collide with the next test's upload of the shared fixture name.
+    """
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from documents where user_id in (%s, %s)",
+                (str(USER_A), str(USER_B)),
+            )
+        conn.commit()
+    yield
+
+
 def _upload(
     client: TestClient,
     token: str,
@@ -132,9 +150,11 @@ def _upload(
     *,
     filename: str = "refund-policy.pdf",
     content_type: str = "application/pdf",
+    replace: bool = False,
 ) -> tuple[int, dict]:
+    params = "?replace=true" if replace else ""
     response = client.post(
-        "/api/v1/documents",
+        f"/api/v1/documents{params}",
         headers={"Authorization": f"Bearer {token}"},
         files={"file": (filename, content, content_type)},
     )
@@ -470,8 +490,6 @@ def test_delete_purges_processed_chunks(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Reprocess: PATCH /documents/{id}/reprocess
 # ---------------------------------------------------------------------------
-
-# US: reprocess
 def test_reprocess_failed_round_trip_200(client: TestClient) -> None:
     """Reprocessing a failed doc resets it to 'uploaded', purges stale chunks,
     and the worker's next claim re-runs the pipeline to 'ready' (docs/ingestion.md
@@ -578,3 +596,321 @@ def test_reprocess_missing_auth_401(client: TestClient) -> None:
     assert (
         client.patch(f"/api/v1/documents/{uuid.uuid4()}/reprocess").status_code == 401
     )
+
+
+# ---------------------------------------------------------------------------
+# Duplicate policy: 409 on repeat upload, ?replace=true supersedes (Phase 12)
+# ---------------------------------------------------------------------------
+
+
+def test_upload_duplicate_filename_409(client: TestClient) -> None:
+    token = _token(USER_A)
+    status, first = _upload(client, token, filename="payroll.pdf")
+    assert status == 201
+
+    status, body = _upload(client, token, filename="payroll.pdf")
+    assert status == 409
+    assert "already" in body["detail"]
+    response = client.post(
+        "/api/v1/documents",
+        headers={"Authorization": f"Bearer {token}"},
+        files={
+            "file": ("payroll.pdf", VALID_PDF, "application/pdf"),
+        },
+    )
+    assert response.headers.get("X-Existing-Document-Id") == first["id"]
+
+
+def test_upload_replace_supersedes_old_and_purges_chunks(client: TestClient) -> None:
+    """US: replace upload → old row stays in the table as 'superseded' with its
+    previous status remembered; the new upload is processed fresh; superseded
+    (and deleted) rows never block a future upload of the same name
+    (docs/ingestion.md §5, §7)."""
+    token = _token(USER_A)
+    status, first = _upload(client, token, filename="payroll.pdf")
+    assert status == 201
+    first_id = uuid.UUID(first["id"])
+
+    status, second = _upload(client, token, filename="payroll.pdf", replace=True)
+    assert status == 201
+    assert second["id"] != first["id"]
+    assert second["status"] == "uploaded"
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, superseded_from from documents where id = %s",
+                (first_id,),
+            )
+            assert cur.fetchone() == ("superseded", "uploaded")
+
+    # status filter sees it
+    response = client.get(
+        "/api/v1/documents?status=superseded",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert any(doc["id"] == first["id"] for doc in response.json())
+
+    # the active replacement still owns the name...
+    status, _ = _upload(client, token, filename="payroll.pdf")
+    assert status == 409
+
+    # ...and re-replacing supersedes the previous replacement in turn
+    status, third = _upload(client, token, filename="payroll.pdf", replace=True)
+    assert status == 201
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status from documents where id = %s",
+                (uuid.UUID(second["id"]),),
+            )
+            assert cur.fetchone()[0] == "superseded"
+    assert third["id"] != second["id"]
+
+
+def test_upload_replace_after_ready_purges_chunks(client: TestClient) -> None:
+    """Replacing a fully-processed document: chunks are KEPT while the
+    replacement processes, and purged only when it reaches 'ready' — a failed
+    replacement can still restore the old version intact (docs/ingestion.md
+    §7)."""
+    token = _token(USER_A)
+    status, doc = _upload(client, token, filename="payroll.pdf", content=make_pdf(["Old content"]))
+    assert status == 201
+    document_id = uuid.UUID(doc["id"])
+
+    async def process(document_id: uuid.UUID, ready: bool = True) -> None:
+        storage = client.app.state.storage_provider  # type: ignore[attr-defined]
+        settings = Settings(
+            database_url=os.environ["DATABASE_URL"],
+            auth_mode="dev",
+            app_env="dev",
+        )
+        from app.providers.ai import build_ai_provider
+
+        ai = build_ai_provider(settings)
+        async with _TestSessionFactory() as db:
+            claimed = await pipeline.claim_next(db, lease_seconds=300)
+            assert claimed is not None and claimed.id == document_id
+            await db.commit()
+        async with _TestSessionFactory() as db:
+            outcome = await pipeline.process_claimed_document(
+                db, storage, settings, claimed, ai
+            )
+            assert outcome == ("ready" if ready else "failed")
+            await db.commit()
+
+    asyncio.run(process(document_id))
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute("select total_chunks from documents where id = %s", (document_id,))
+            assert cur.fetchone()[0] == 1
+
+    status, replacement = _upload(
+        client, token, filename="payroll.pdf", replace=True, content=make_pdf(["New content"])
+    )
+    assert status == 201
+
+    # outcome pending: old chunks stay, old status remembered
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, superseded_from from documents where id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone() == ("superseded", "ready")
+            cur.execute(
+                "select count(*) from document_chunks where document_id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone()[0] == 1
+
+    # replacement reaches ready -> old is finalized: superseded forever,
+    # chunks purged, superseded_from cleared
+    asyncio.run(process(uuid.UUID(replacement["id"])))
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, superseded_from, total_chunks from documents where id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone() == ("superseded", None, None)
+            cur.execute(
+                "select count(*) from document_chunks where document_id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone()[0] == 0
+
+    # deleting the finalized replacement does NOT restore the old version
+    assert client.delete(
+        f"/api/v1/documents/{replacement['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    ).status_code == 204
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status from documents where id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone()[0] == "superseded"
+
+
+def test_upload_replace_failure_restores_old_status(client: TestClient) -> None:
+    """When the replacement fails, the old document returns to its previous
+    status with its chunks intact — never left behind as 'Outdated'
+    (docs/ingestion.md §7)."""
+    token = _token(USER_A)
+    status, first = _upload(
+        client, token, filename="payroll.pdf", content=make_pdf(["Keep me"])
+    )
+    assert status == 201
+    first_id = uuid.UUID(first["id"])
+
+    async def process() -> None:
+        storage = client.app.state.storage_provider  # type: ignore[attr-defined]
+        settings = Settings(
+            database_url=os.environ["DATABASE_URL"],
+            auth_mode="dev",
+            app_env="dev",
+        )
+        from app.providers.ai import build_ai_provider
+
+        ai = build_ai_provider(settings)
+        async with _TestSessionFactory() as db:
+            claimed = await pipeline.claim_next(db, lease_seconds=300)
+            assert claimed is not None and claimed.id == first_id
+            await db.commit()
+        async with _TestSessionFactory() as db:
+            outcome = await pipeline.process_claimed_document(
+                db, storage, settings, claimed, ai
+            )
+            assert outcome == "ready"
+            await db.commit()
+
+    asyncio.run(process())
+
+    status, replacement = _upload(client, token, filename="payroll.pdf", replace=True)
+    assert status == 201
+
+    # worker's terminal failure (docs/api.md §3): the resolution trigger runs
+    # in the same transaction as this update
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update documents set status = 'failed', status_error = 'boom', "
+                "retry_count = 0 where id = %s",
+                (replacement["id"],),
+            )
+        conn.commit()
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, superseded_from, total_chunks from documents where id = %s",
+                (first_id,),
+            )
+            assert cur.fetchone() == ("ready", None, 1)
+            cur.execute(
+                "select count(*) from document_chunks where document_id = %s",
+                (first_id,),
+            )
+            assert cur.fetchone()[0] == 1
+            # the failed attempt left the active set, so the name is held only
+            # by the restored original again (active filename index, migration 0005)
+            cur.execute(
+                "select status, superseded_from from documents where id = %s",
+                (replacement["id"],),
+            )
+            assert cur.fetchone() == ("superseded", "failed")
+
+
+def test_upload_replace_deleted_replacement_restores_old(client: TestClient) -> None:
+    """Deleting a not-yet-resolved replacement undoes the replace: the old
+    document returns to its previous status (docs/ingestion.md §7)."""
+    token = _token(USER_A)
+    status, first = _upload(client, token, filename="payroll.pdf")
+    assert status == 201
+    first_id = uuid.UUID(first["id"])
+
+    status, replacement = _upload(client, token, filename="payroll.pdf", replace=True)
+    assert status == 201
+
+    assert client.delete(
+        f"/api/v1/documents/{replacement['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    ).status_code == 204
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, superseded_from from documents where id = %s",
+                (first_id,),
+            )
+            assert cur.fetchone() == ("uploaded", None)
+
+
+def test_upload_replace_with_storage_failure_keeps_old_active(client: TestClient) -> None:
+    """The supersede runs in the upload transaction: a storage failure rolls
+    back, so the old document stays active (never half-replaced)."""
+    token = _token(USER_A)
+    status, first = _upload(client, token, filename="payroll.pdf")
+    assert status == 201
+
+    app = client.app
+
+    class _ReplaceFailingStorage:
+        async def upload(self, *, key: str, data: bytes, content_type: str) -> None:
+            raise StorageError("simulated storage outage")
+
+        async def download(self, *, key: str) -> bytes:
+            raise StorageError("simulated storage outage")
+
+        async def delete(self, *, key: str) -> None:
+            raise StorageError("simulated storage outage")
+
+        async def signed_url(self, *, key: str, expires_in_seconds: int = 300) -> str:
+            raise StorageError("simulated storage outage")
+
+    original = app.state.storage_provider
+    app.state.storage_provider = _ReplaceFailingStorage()
+    try:
+        status, body = _upload(client, token, filename="payroll.pdf", replace=True)
+        assert status == 502
+        assert "unavailable" in body["detail"]
+    finally:
+        app.state.storage_provider = original
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, total_chunks from documents where id = %s",
+                (uuid.UUID(first["id"]),),
+            )
+            assert cur.fetchone() == ("uploaded", None)
+
+
+def test_upload_replace_without_duplicate_201(client: TestClient) -> None:
+    status, doc = _upload(client, _token(USER_A), filename="fresh.pdf", replace=True)
+    assert status == 201
+    assert doc["status"] == "uploaded"
+
+
+def test_upload_cross_tenant_same_filename_201(client: TestClient) -> None:
+    token_a, token_b = _token(USER_A), _token(USER_B)
+    status_a, doc_a = _upload(client, token_a, filename="shared.pdf")
+    status_b, doc_b = _upload(client, token_b, filename="shared.pdf")
+    assert status_a == 201
+    assert status_b == 201
+    assert doc_a["id"] != doc_b["id"]
+
+
+def test_upload_after_delete_same_filename_201(client: TestClient) -> None:
+    token = _token(USER_A)
+    _, doc = _upload(client, token, filename="once.pdf")
+    assert client.delete(
+        f"/api/v1/documents/{doc['id']}", headers={"Authorization": f"Bearer {token}"}
+    ).status_code == 204
+    status, _ = _upload(client, token, filename="once.pdf")
+    assert status == 201

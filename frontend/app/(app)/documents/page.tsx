@@ -45,7 +45,7 @@ export default function DocumentsPage() {
       </section>
 
       <section className="mt-6">
-        <UploadDropzone upload={upload} />
+        <UploadDropzone upload={upload} documents={documents} />
       </section>
 
       <section className="mt-8">
