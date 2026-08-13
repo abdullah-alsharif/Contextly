@@ -54,7 +54,7 @@ export default function DocumentTable({
             {pageRows.map((document) => (
               <tr
                 key={document.id}
-                className="group border-b border-surface-variant last:border-0 hover:bg-surface-container-low"
+                className="border-b border-surface-variant last:border-0 hover:bg-surface-container-low"
               >
                 <td className="max-w-64 px-6 py-3">
                   <div className="flex items-center gap-2.5">
@@ -120,7 +120,7 @@ export default function DocumentTable({
                         aria-label={`Delete ${document.filename}`}
                         disabled={reprocessingId === document.id}
                         onClick={() => setConfirmId(document.id)}
-                        className="rounded-md p-1.5 text-on-surface-variant opacity-0 transition-all hover:bg-error-container/50 hover:text-error focus:opacity-100 group-hover:opacity-100 disabled:opacity-0"
+                        className="rounded-md p-1.5 text-on-surface-variant transition-colors hover:bg-error-container/50 hover:text-error disabled:opacity-0"
                       >
                         <span className="material-symbols-outlined text-sm">delete</span>
                       </button>

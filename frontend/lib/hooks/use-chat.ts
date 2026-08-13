@@ -85,19 +85,25 @@ export function useChat(conversationId: string | undefined) {
       }
       const assistantLocalId = `a-${Date.now()}`;
 
-      setMessages((rows) => [
-        ...rows
-          // drop the previous failed assistant stub if we're retrying
-          .filter((row) => !(row.failed && row.role === "assistant")),
-        { role: "user", content, sources: [], localId: `u-${Date.now()}` },
-        {
-          role: "assistant",
-          content: "",
-          sources: [],
-          pending: true,
-          localId: assistantLocalId,
-        },
-      ]);
+      setMessages((rows) => {
+        const base = rows.filter((row) => !(row.failed && row.role === "assistant"));
+        const next = onRetry
+          ? base
+          : [
+              ...base,
+              { role: "user" as const, content, sources: [], localId: `u-${Date.now()}` },
+            ];
+        return [
+          ...next,
+          {
+            role: "assistant",
+            content: "",
+            sources: [],
+            pending: true,
+            localId: assistantLocalId,
+          },
+        ];
+      });
       setStreaming(true);
       setError(null);
       setLastQuestion(content);

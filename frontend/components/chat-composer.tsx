@@ -119,12 +119,28 @@ export default function ChatComposer({
         </div>
       </div>
 
-      <p className="mt-2 text-center font-display text-label-sm text-on-surface-variant">
-        {busy
-          ? "Contextly is answering…"
-          : blockedReason
-            ? `${blockedReason} (the API rejects questions without selected documents).`
-            : "AI can make mistakes. Consider verifying important information."}
+      <p className="mt-2 flex items-center justify-center gap-1 font-display text-label-sm text-on-surface-variant">
+        {busy ? (
+          <span className="inline-flex items-center">
+            Contextly is answering
+            <span
+              className="typing-dot ml-1 h-1 w-1 rounded-full bg-on-surface-variant"
+              style={{ animationDelay: "0ms" }}
+            />
+            <span
+              className="typing-dot ml-1 h-1 w-1 rounded-full bg-on-surface-variant"
+              style={{ animationDelay: "150ms" }}
+            />
+            <span
+              className="typing-dot ml-1 h-1 w-1 rounded-full bg-on-surface-variant"
+              style={{ animationDelay: "300ms" }}
+            />
+          </span>
+        ) : blockedReason ? (
+          `${blockedReason} (the API rejects questions without selected documents).`
+        ) : (
+          "AI can make mistakes. Consider verifying important information."
+        )}
       </p>
     </div>
   );

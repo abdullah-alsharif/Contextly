@@ -8,11 +8,13 @@ mapping: 400 invalid upload, 413 oversized, 404 not owned/nonexistent/deleted,
 
 from __future__ import annotations
 
+import io
 import logging
 import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import enforce_general_rate_limit
@@ -24,6 +26,7 @@ from app.providers.storage.base import StorageProvider
 from app.schemas.document import DocumentOut, DownloadUrlOut
 from app.services.documents import (
     DocumentNotFoundError,
+    DownloadError,
     DuplicateDocumentError,
     InvalidUploadError,
     ReprocessNotAllowedError,
@@ -32,6 +35,7 @@ from app.services.documents import (
     UploadTooLargeError,
     create_document,
     delete_document,
+    download_document,
     get_document,
     get_document_download_url,
     list_documents,
@@ -168,6 +172,36 @@ async def get_download_url(
             status_code=502, detail="file storage is unavailable"
         ) from exc
     return {"url": url, "expires_at": expires_at}
+
+
+@router.get("/{document_id}/download")
+async def download_document_bytes(
+    document_id: uuid.UUID,
+    identity: Identity = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageProvider = Depends(get_storage_provider),
+) -> StreamingResponse:
+    """Stream the document's PDF bytes inline (docs/api.md §5).
+
+    Authenticated stream (Bearer token), so the frontend fetches the bytes via
+    XHR and opens a blob URL — works for every storage provider instead of
+    depending on browser-navigable signed URLs (a local file:// URI can't be
+    opened from an http:// page). Owner-only 404, storage failure 502.
+    """
+    try:
+        filename, data = await download_document(db, storage, identity, document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DownloadError as exc:
+        logger.error("download failed for user %s: %s", identity.user_id, exc)
+        raise HTTPException(
+            status_code=502, detail="file storage is unavailable"
+        ) from exc
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.delete("/{document_id}", status_code=204)

@@ -1,8 +1,7 @@
 "use client";
 
-// Sidebar — mirrors prototypes/chat.html SideNavBar: bg-surface shell,
-// avatar brand header, primary CTA with shadow, active nav item with fill
-// icon + left accent, Recent list, user chip with sign-out.
+// Sidebar — mirrors prototypes/chat.html SideNavBar: brand header, new-chat
+// CTA, nav, Recent list, user chip with confirm-then-sign-out popover.
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -24,15 +23,20 @@ export default function Sidebar() {
     if (confirmSignOut) confirmRef.current?.focus({ preventScroll: true });
   }, [confirmSignOut]);
 
+  // Recents: mount fetch + 5s poll (same as use-documents).
   useEffect(() => {
     let cancelled = false;
-    listConversations()
-      .then((rows) => {
-        if (!cancelled) setRecent(rows.slice(0, 5));
-      })
-      .catch(() => {
-        // sidebar renders without recents
-      });
+    const refreshRecent = () => {
+      void listConversations()
+        .then((rows) => {
+          if (!cancelled) setRecent(rows.slice(0, 5));
+        })
+        .catch(() => {
+          // sidebar renders without recents
+        });
+    };
+    refreshRecent();
+    const timer = window.setInterval(refreshRecent, 5000);
     fetch("/api/v1/auth/me")
       .then((res) => (res.ok ? res.json() : null))
       .then((profile) => {
@@ -41,6 +45,7 @@ export default function Sidebar() {
       .catch(() => {});
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -103,17 +108,30 @@ export default function Sidebar() {
             No conversations yet
           </p>
         ) : (
-          recent.map((conversation) => (
-            <Link
-              key={conversation.id}
-              href={`/chat/${conversation.id}`}
-              className="flex items-center gap-3 rounded-lg px-stack-sm py-2 text-on-surface-variant transition-colors duration-200 hover:bg-surface-container"
-            >
-              <span className="material-symbols-outlined text-[20px]">history</span>
-              <span className="font-display text-label-md truncate">{conversation.title}</span>
-            </Link>
-          ))
-        )}
+          recent.map((conversation) => {
+            const active = pathname === `/chat/${conversation.id}`;
+            return (
+              <Link
+                key={conversation.id}
+                href={`/chat/${conversation.id}`}
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-3 rounded-lg px-stack-sm py-2 transition-colors duration-200 ${
+                  active
+                    ? "bg-surface-container-low font-bold text-secondary"
+                    : "text-on-surface-variant hover:bg-surface-container"
+                }`}
+              >
+                <span
+                  className={`material-symbols-outlined text-[20px] ${
+                    active ? "fill text-secondary" : ""
+                  }`}
+                >
+                  history
+                </span>
+                <span className="font-display text-label-md truncate">{conversation.title}</span>
+              </Link>
+            );
+          }))}
 
         <div className="mt-2 flex items-center gap-2.5 rounded-lg bg-surface-container-low px-stack-sm py-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-secondary">
@@ -138,36 +156,36 @@ export default function Sidebar() {
                 role="alertdialog"
                 aria-label="Confirm sign out"
                 className="dialog-in absolute bottom-full right-0 z-10 mb-2 w-52 rounded-xl border border-outline-variant bg-surface p-3 shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1)] outline-none"
-              onKeyDown={(event) => {
-                if (event.key === "Escape") setConfirmSignOut(false);
-              }}
-            >
-              <p className="font-display text-label-sm font-medium text-on-surface">
-                Sign out of Contextly?
-              </p>
-              <p className="mt-0.5 text-label-sm text-on-surface-variant">
-                You&apos;ll need to sign in again to access your documents.
-              </p>
-              <div className="mt-2.5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setConfirmSignOut(false)}
-                  className="rounded-lg px-3 py-1.5 font-display text-label-sm text-on-surface-variant transition-colors hover:bg-surface-container"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void signOutLocally()}
-                  className="rounded-lg bg-secondary px-3 py-1.5 font-display text-label-sm text-on-secondary transition-colors hover:bg-secondary/90"
-                >
-                  Sign out
-                </button>
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setConfirmSignOut(false);
+                }}
+              >
+                <p className="font-display text-label-sm font-medium text-on-surface">
+                  Sign out of Contextly?
+                </p>
+                <p className="mt-0.5 text-label-sm text-on-surface-variant">
+                  You&apos;ll need to sign in again to access your documents.
+                </p>
+                <div className="mt-2.5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmSignOut(false)}
+                    className="rounded-lg px-3 py-1.5 font-display text-label-sm text-on-surface-variant transition-colors hover:bg-surface-container"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void signOutLocally()}
+                    className="rounded-lg bg-secondary px-3 py-1.5 font-display text-label-sm text-on-secondary transition-colors hover:bg-secondary/90"
+                  >
+                    Sign out
+                  </button>
+                </div>
               </div>
+            )}
             </div>
-          )}
-        </div>
-      </div>
+          </div>
       </div>
     </aside>
   );

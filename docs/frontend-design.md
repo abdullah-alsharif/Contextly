@@ -43,16 +43,17 @@ Inventory in `frontend/components/`:
 | Prototype | Component | Spec |
 |---|---|---|
 | Sidebar | `sidebar.tsx` | `w-64`, brand header, "New Conversation" primary CTA (chat is entered through it — no separate Chat nav item), nav (Documents / Settings), footer "Recent" list + user chip |
-| Top bar | `topbar.tsx` | Search field (rounded, focus ring), global Upload button |
+| Top bar | `topbar.tsx` | Chat-only (rendered by the nested `chat/layout.tsx`): search field (rounded, focus ring) + Upload button; absent on Documents and Settings pages |
+| Page title bar | `page-title-bar.tsx` | Non-chat pages get a slim `h-16` title band (border-b, same horizontal rhythm as the topbar) with page title + subtitle — anchored top edge without the chat controls |
 | Stat card | `stat-card.tsx` | Flat card, corner watermark icon @10% opacity, label-uppercase, display-lg number, trend line in accent |
 | Upload zone | `upload-dropzone.tsx` | Dashed border card, hover→border-secondary, icon circle, multi-file drop with aggregate progress, duplicate 409 → equal-weight two-choice card fork: “Update existing” (reversible replace) vs “Upload under a new name” (pre-suggested `name-2.pdf`, editable). Dialog shows the current version's facts (size · date) so the choice is informed, enters with a motion-safe rise (`dialogIn`), and focus moves into it. Multi-file batches run as a queue — each duplicate gets its dialog in turn (with a "N more files waiting" note) and the remainder resumes; nothing is dropped |
-| Docs table | `document-table.tsx` | Border-less rows, horizontal `1px` dividers, hover `#F8FAFC`, row actions appear on hover (delete icon, inline confirm), failed rows show an always-visible Re-process action, `body-sm` density, pagination footer |
+| Docs table | `document-table.tsx` | Border-less rows, horizontal `1px` dividers, hover `#F8FAFC`, always-visible row actions (delete icon, inline confirm), failed rows show an always-visible Re-process action, `body-sm` density, pagination footer |
 | Status badge | `status-badge.tsx` | Pill: Ready (`secondary-fixed`), Processing (spinner `sync`), Queued (`surface-container-high`), Failed (`error-container`), Outdated (`tertiary-fixed`, `history_toggle_off` — replaced by a newer upload), Deleted (`surface-container-high`) |
 | Context panel | `context-panel.tsx` | Chat left panel `w-72`: "Context Selection", doc rows with `picture_as_pdf` / `description` / `text_snippet` icons + filename + meta (`Uploaded · size`) + checkbox |
 | Chat bubble | `chat-message.tsx` | AI: `surface-container-low` card, `rounded-xl rounded-tl-none`, 1px border; user: solid `secondary` bg white text; typing indicator = 3 bouncing dots + "Analyzing documents…" |
 | Source quote | `source-excerpt.tsx` | In-answer quoted block: left accent bar `w-1 bg-secondary`, "Excerpt from Source" label, italic quote |
 | Citation chip | `citation-chip.tsx` | `[1]` + filename, p.N — pill with `tertiary-fixed` bg + border, hover→`tertiary-fixed-dim` |
-| Source viewer | `source-viewer.tsx` | Right panel `w-80`: card w/ primary-accented header `[1] filename · Page N`, excerpt with `<mark>` highlighted span, "Open Document" link |
+| Source viewer | `source-viewer.tsx` | Right panel `w-80`: card w/ primary-accented header `[1] filename · Page N`, excerpt with `<mark>` highlighted span, "Open Document" button (streams the PDF via a blob URL) |
 | Composer | `chat-composer.tsx` | Rounded input box with "Using: …" chips (removable, `surface-container-high` pills), textarea, attach/voice ghost actions, accent send button, disclaimer line "AI can make mistakes. Consider verifying important information." |
 | Typing indicator | `typing-indicator.tsx` | three `w-2 h-2` `bg-secondary` dots, `animate-bounce` staggered 0/150/300ms |
 

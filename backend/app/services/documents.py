@@ -138,6 +138,10 @@ class SignedUrlError(Exception):
     """Storage backend refused to sign a download URL (→ 502, upstream)."""
 
 
+class DownloadError(Exception):
+    """Storage backend failed to serve a document's bytes (→ 502, upstream)."""
+
+
 class DocumentNotFoundError(Exception):
     """Document missing, not owned, or deleted (→ 404, deliberately ambiguous)."""
 
@@ -420,6 +424,32 @@ async def get_document_download_url(
     # config.py), so expires_at is never longer than the issued token's lifetime.
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
     return url, expires_at
+
+
+async def download_document(
+    db: AsyncSession,
+    storage: StorageProvider,
+    identity: Identity,
+    document_id: uuid.UUID,
+) -> tuple[str, bytes]:
+    """Stream one of the caller's documents as raw bytes (docs/api.md §5).
+
+    Owner-only — a foreign/missing id raises DocumentNotFoundError (404,
+    docs/security.md §2 anti-enumeration). A storage read failure maps to 502
+    (DownloadError) without leaking the object path.
+    """
+    result = await db.execute(
+        _GET_DOCUMENT,
+        {"document_id": str(document_id), "user_id": str(identity.user_id)},
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise DocumentNotFoundError("document not found")
+    try:
+        data = await storage.download(key=row.storage_path)
+    except StorageError as exc:
+        raise DownloadError("download failed") from exc
+    return row.filename, data
 
 
 def _serialize(row: Any) -> dict[str, Any]:

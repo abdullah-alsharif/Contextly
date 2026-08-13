@@ -224,10 +224,17 @@ export function reprocessDocument(id: string): Promise<Document> {
   return request<Document>(`/api/v1/documents/${id}/reprocess`, { method: "PATCH" });
 }
 
-export function getDownloadUrl(id: string): Promise<{ url: string; expires_at: string }> {
-  return request<{ url: string; expires_at: string }>(
-    `/api/v1/documents/${id}/download-url`,
-  );
+export async function downloadDocument(id: string): Promise<Blob> {
+  const token = await getBrowserAccessToken();
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(`${BACKEND_URL}/api/v1/documents/${id}/download`, { headers });
+  if (res.status === 401) {
+    await signOutLocally();
+    throw new ApiError(401, "Your session expired. Please sign in again.");
+  }
+  if (!res.ok) throw new ApiError(res.status, "Could not download the document.");
+  return res.blob();
 }
 
 // ---- Conversations (contracts C3) ------------------------------------------

@@ -88,3 +88,22 @@ body {
     animation: dialogIn 220ms ease-out;
   }
 }
+
+/* "Contextly is answering…" dots (chat-composer) — staggered pulse. */
+@keyframes typingDot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: none;
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .typing-dot {
+    animation: typingDot 1.2s ease-in-out infinite;
+  }
+}

@@ -137,6 +137,7 @@ Client sends `Idempotency-Key: <uuid>` on POST; backend dedupes the user message
 | Method | URL | Response | Notes |
 |---|---|---|---|
 | GET | `/documents/{id}/download-url` | `200 {url, expires_at}` | short-lived signed storage URL (5 min) |
+| GET | `/documents/{id}/download` | `200 application/pdf` | authenticated byte stream (`Content-Disposition: inline`) |
 
 A download URL is issued only for an owned, non-deleted document regardless of
 processing status (mirrors `GET /documents/{id}`); a foreign/missing id returns

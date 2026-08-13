@@ -1,6 +1,5 @@
-// Chat message — mirrors prototypes/chat.html: AI in surface-container-low
-// card (rounded-xl, border, shadow, no top-left radius); user solid secondary.
-// Renders `[n]` markers as citation chips.
+// Chat message — mirrors prototypes/chat.html: AI card (rounded-xl, no
+// top-left radius), user solid secondary; renders `[n]` markers as chips.
 "use client";
 
 import CitationChip from "@/components/citation-chip";
@@ -79,7 +78,14 @@ export default function ChatMessage({
         {pending && !content ? (
           <TypingIndicator />
         ) : (
-          <div className="whitespace-pre-wrap">{onCite && sources ? renderWithCitations(content, sources, onCite) : content}</div>
+          <div className="whitespace-pre-wrap">
+            {onCite && sources ? renderWithCitations(content, sources, onCite) : content}
+            {pending && (
+              <span className="ml-1">
+                <TypingIndicator />
+              </span>
+            )}
+          </div>
         )}
         {failed && !content && (
           <p className="mt-1 text-label-sm text-error">The answer failed. Try again.</p>

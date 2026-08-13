@@ -339,6 +339,47 @@ def test_detail_nonexistent_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_download_own_document_200(client: TestClient) -> None:
+    token = _token(USER_A)
+    _, doc = _upload(client, token, content=VALID_PDF)
+    response = client.get(
+        f"/api/v1/documents/{doc['id']}/download",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert 'inline; filename="refund-policy.pdf"' in response.headers[
+        "content-disposition"
+    ]
+    assert response.content == VALID_PDF
+
+
+def test_download_cross_tenant_404(client: TestClient) -> None:
+    token_a, token_b = _token(USER_A), _token(USER_B)
+    _, doc_a = _upload(client, token_a)
+    response = client.get(
+        f"/api/v1/documents/{doc_a['id']}/download",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+    assert response.status_code == 404
+
+
+def test_download_storage_failure_502(client: TestClient) -> None:
+    token = _token(USER_A)
+    _, doc = _upload(client, token)
+    app = client.app
+    original = app.state.storage_provider
+    app.state.storage_provider = _FailingStorage()
+    try:
+        response = client.get(
+            f"/api/v1/documents/{doc['id']}/download",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 502
+    finally:
+        app.state.storage_provider = original
+
+
 def test_detail_missing_auth_401(client: TestClient) -> None:
     assert client.get(f"/api/v1/documents/{uuid.uuid4()}").status_code == 401
 

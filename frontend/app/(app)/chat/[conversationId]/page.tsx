@@ -67,14 +67,19 @@ export default function ConversationPage() {
     return () => document.getElementById("ai-context-bar")?.classList.remove("active");
   }, [streaming]);
 
-  // Auto-scroll to live deltas, respecting user scroll position (stick to
-  // bottom only when already near it).
+  // Auto-scroll: jump on new messages; while streaming, follow only when the
+  // user is already near the bottom (so scrolling up isn't overridden).
+  const scrollTracker = useRef<{ messageId: string | null }>({ messageId: null });
   useEffect(() => {
     const container = scrollRef.current;
     if (!container) return;
+    const last = messages[messages.length - 1];
+    const lastId = last?.localId ?? null;
+    const newMessage = lastId !== scrollTracker.current.messageId;
+    scrollTracker.current.messageId = lastId;
     const nearBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight < 120;
-    if (streaming ? nearBottom : true) {
+    if (newMessage || (streaming && nearBottom)) {
       container.scrollTop = container.scrollHeight;
     }
   });
