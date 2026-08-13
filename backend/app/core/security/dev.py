@@ -25,6 +25,7 @@ def dev_token(
     secret: str = "contextly-dev-secret-0123456789abcdef",
     *,
     email: str | None = None,
+    full_name: str | None = None,
     expires_in_seconds: int | None = 3600,
     issued_at: int | None = None,
     aud: str = DEV_AUDIENCE,
@@ -37,6 +38,8 @@ def dev_token(
         payload["exp"] = now + expires_in_seconds
     if email is not None:
         payload["email"] = email
+    if full_name is not None:
+        payload["full_name"] = full_name
     return jwt.encode(payload, secret, algorithm="HS256")
 
 
@@ -76,4 +79,9 @@ def _identity_from_claims(claims: dict[str, object]) -> Identity:
     email = claims.get("email")
     if not isinstance(email, str):
         email = None
-    return Identity(user_id=user_id, email=email, claims=claims)
+    full_name = claims.get("full_name")
+    if not isinstance(full_name, str):
+        metadata = claims.get("user_metadata")
+        candidate = metadata.get("full_name") if isinstance(metadata, dict) else None
+        full_name = candidate if isinstance(candidate, str) else None
+    return Identity(user_id=user_id, email=email, full_name=full_name, claims=claims)

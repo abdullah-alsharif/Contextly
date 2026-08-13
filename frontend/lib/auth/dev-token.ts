@@ -14,8 +14,13 @@ export function devUserIdFromEmail(email: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export async function mintDevToken(email: string): Promise<string> {
-  return new SignJWT({ email })
+export async function mintDevToken(
+  email: string,
+  fullName?: string,
+): Promise<string> {
+  const payload: Record<string, string> = { email };
+  if (fullName) payload.full_name = fullName;
+  return new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(devUserIdFromEmail(email))
     .setAudience(DEV_AUDIENCE)

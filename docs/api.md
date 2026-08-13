@@ -13,13 +13,14 @@ Conventions:
 ## 1. Authentication
 
 Supabase handles credentials. Frontend calls Supabase Auth directly (client-side flows);
-the backend only validates JWTs. The backend exposes `/auth/me` for the profile.
+the backend only validates JWTs. The backend exposes GET/PATCH `/auth/me` for the profile.
 
 | Method | URL | Auth | Body | Response | Errors |
 |---|---|---|---|---|---|
 | POST | `/auth/register`* | none | uses Supabase `signUp` | n/a | delegated to Supabase |
 | POST | `/auth/login`* | none | uses Supabase `signIn` | n/a | delegated |
 | GET | `/auth/me` | JWT | – | `200 {profile}` | 401 |
+| PATCH | `/auth/me` | JWT | `{"full_name": string?}` | `200 {profile}` | 401, 422 |
 | POST | `/auth/logout`* | JWT | – | 204 | – |
 
 \* forwarded/proxied by the frontend server to Supabase; not part of FastAPI in MVP.

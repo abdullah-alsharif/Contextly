@@ -384,7 +384,26 @@ export async function streamAnswer(
   }
 }
 
-// ---- Session helpers ---------------------------------------------------------
+// ---- Profile + session (contracts C1) ----------------------------------------
+
+export interface Profile {
+  id: string;
+  email: string;
+  full_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getProfile(): Promise<Profile> {
+  return request<Profile>("/api/v1/auth/me");
+}
+
+export function updateProfile(fullName: string | null): Promise<Profile> {
+  return request<Profile>("/api/v1/auth/me", {
+    method: "PATCH",
+    body: JSON.stringify({ full_name: fullName }),
+  });
+}
 
 export async function signOutLocally(): Promise<void> {
   const token = await getBrowserAccessToken();

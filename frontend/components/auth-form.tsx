@@ -8,6 +8,7 @@ import Link from "next/link";
 
 export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +24,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
       const res = await fetch(`/api/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, fullName }),
       });
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -45,6 +46,23 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   return (
     <form onSubmit={handleSubmit} className="w-full" noValidate>
       <div className="space-y-4">
+        {!isLogin && (
+          <div className="space-y-1.5">
+            <label htmlFor="full-name" className="block font-display text-label-sm text-ink-900">
+              Full name
+            </label>
+            <input
+              id="full-name"
+              type="text"
+              name="fullName"
+              autoComplete="name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Jane Doe"
+              className="w-full rounded-lg border border-outline-variant bg-white px-3 py-2 text-body-sm text-ink-700 transition-colors placeholder:text-on-surface-variant/70 focus:border-secondary focus-ring"
+            />
+          </div>
+        )}
         <div className="space-y-1.5">
           <label htmlFor="email" className="block font-display text-label-sm text-ink-900">
             Email address
@@ -58,7 +76,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
-            className="w-full rounded-lg border border-outline-variant bg-white px-3 py-2 text-body-sm text-ink-700 transition-colors placeholder:text-on-surface-variant/70/70 focus:border-secondary focus-ring"
+            className="w-full rounded-lg border border-outline-variant bg-white px-3 py-2 text-body-sm text-ink-700 transition-colors placeholder:text-on-surface-variant/70 focus:border-secondary focus-ring"
           />
         </div>
         <div className="space-y-1.5">
@@ -75,7 +93,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="At least 6 characters"
-            className="w-full rounded-lg border border-outline-variant bg-white px-3 py-2 text-body-sm text-ink-700 transition-colors placeholder:text-on-surface-variant/70/70 focus:border-secondary focus-ring"
+            className="w-full rounded-lg border border-outline-variant bg-white px-3 py-2 text-body-sm text-ink-700 transition-colors placeholder:text-on-surface-variant/70 focus:border-secondary focus-ring"
           />
         </div>
       </div>

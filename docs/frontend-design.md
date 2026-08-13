@@ -42,7 +42,7 @@ Inventory in `frontend/components/`:
 
 | Prototype | Component | Spec |
 |---|---|---|
-| Sidebar | `sidebar.tsx` | `w-64`, brand header, "New Conversation" primary CTA (chat is entered through it — no separate Chat nav item), nav (Documents / Settings), footer "Recent" list + user chip |
+| Sidebar | `sidebar.tsx` | `w-64`, brand header, "New Conversation" primary CTA (chat is entered through it — no separate Chat nav item), nav (Documents / Settings), footer "Recent" list + user chip (name, falling back to email) |
 | Top bar | `topbar.tsx` | Chat-only (rendered by the nested `chat/layout.tsx`): search field (rounded, focus ring) + Upload button; absent on Documents and Settings pages |
 | Page title bar | `page-title-bar.tsx` | Non-chat pages get a slim `h-16` title band (border-b, same horizontal rhythm as the topbar) with page title + subtitle — anchored top edge without the chat controls |
 | Stat card | `stat-card.tsx` | Flat card, corner watermark icon @10% opacity, label-uppercase, display-lg number, trend line in accent |
@@ -99,7 +99,10 @@ Skip in MVP (see mvp-scope.md) — detail view renders from `GET /documents/{id}
 
 ### `/login` `/register` `/settings` — not in prototypes
 Use the same tokens: centered card on `background`, primary button, `rounded-lg`,
-focus ring; settings reuses `sidebar` list rows + form inputs.
+focus ring; settings reuses `sidebar` list rows + form inputs. Register captures
+the display name (full name); the sidebar user chip shows the name when set
+(falling back to email); `/settings` edits the name via
+`PATCH /auth/me` (email is read-only).
 
 ## 5. Margins/borders conventions
 

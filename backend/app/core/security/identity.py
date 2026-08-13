@@ -17,4 +17,5 @@ class Identity:
 
     user_id: uuid.UUID
     email: str | None = None
+    full_name: str | None = None
     claims: dict[str, Any] = field(default_factory=dict)

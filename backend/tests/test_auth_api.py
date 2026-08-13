@@ -98,6 +98,147 @@ def test_auth_me_is_idempotent(client: TestClient, cleanup: None) -> None:
             assert cur.fetchone()[0] == 1
 
 
+NAME_SUB = uuid.uuid4()
+
+
+def _teardown_profile(user_id: uuid.UUID) -> None:
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute("delete from profiles where id = %s", (user_id,))
+            cur.execute("delete from auth.users where id = %s", (user_id,))
+        conn.commit()
+
+
+def test_auth_me_provisions_full_name_from_claim(client: TestClient) -> None:
+    """The dev token's full_name claim lands in the profile row on first /me."""
+    token = dev_token(
+        NAME_SUB,
+        secret=DEV_SECRET,
+        email="name@dev.contextly.local",
+        full_name="Ada Lovelace",
+    )
+    try:
+        response = client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 200
+        assert response.json()["full_name"] == "Ada Lovelace"
+
+        with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+            with conn.cursor() as cur:
+                cur.execute("select full_name from profiles where id = %s", (NAME_SUB,))
+                assert cur.fetchone()[0] == "Ada Lovelace"
+
+        # A later token without the claim must not wipe the stored name
+        # (conflict updates keep the persisted full_name).
+        bare = client.get(
+            "/api/v1/auth/me",
+            headers={
+                "Authorization": f"Bearer {dev_token(NAME_SUB, secret=DEV_SECRET)}"
+            },
+        )
+        assert bare.status_code == 200
+        assert bare.json()["full_name"] == "Ada Lovelace"
+    finally:
+        _teardown_profile(NAME_SUB)
+
+
+def test_patch_auth_me_updates_full_name(client: TestClient) -> None:
+    """PATCH /auth/me sets the display name; null (or whitespace) clears it."""
+    token = dev_token(NAME_SUB, secret=DEV_SECRET, email="patch@dev.contextly.local")
+    try:
+        provisioned = client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert provisioned.json()["full_name"] is None
+
+        response = client.patch(
+            "/api/v1/auth/me",
+            json={"full_name": "Grace Hopper"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["full_name"] == "Grace Hopper"
+
+        with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+            with conn.cursor() as cur:
+                cur.execute("select full_name from profiles where id = %s", (NAME_SUB,))
+                assert cur.fetchone()[0] == "Grace Hopper"
+
+        cleared = client.patch(
+            "/api/v1/auth/me",
+            json={"full_name": "   "},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["full_name"] is None
+    finally:
+        _teardown_profile(NAME_SUB)
+
+
+def test_patch_auth_me_trims_and_rejects_long_name(client: TestClient) -> None:
+    token = dev_token(NAME_SUB, secret=DEV_SECRET, email="trim@dev.contextly.local")
+    try:
+        response = client.patch(
+            "/api/v1/auth/me",
+            json={"full_name": "  Alan Turing  "},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["full_name"] == "Alan Turing"
+
+        long_name = client.patch(
+            "/api/v1/auth/me",
+            json={"full_name": "x" * 121},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert long_name.status_code == 422
+    finally:
+        _teardown_profile(NAME_SUB)
+
+
+def test_auth_me_does_not_revert_patched_name_on_stale_claim(
+    client: TestClient,
+) -> None:
+    """ensure_profile runs on every request; a token whose claim carries a
+    name set at register time must never overwrite the persisted name back.
+    The claim seeds the row on first sight only (profiles.py upsert).
+    """
+    token = dev_token(
+        NAME_SUB,
+        secret=DEV_SECRET,
+        email="stale@dev.contextly.local",
+        full_name="Old Claim Name",
+    )
+    try:
+        provisioned = client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert provisioned.json()["full_name"] == "Old Claim Name"
+
+        patched = client.patch(
+            "/api/v1/auth/me",
+            json={"full_name": "New Patched Name"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert patched.json()["full_name"] == "New Patched Name"
+
+        for _ in range(2):
+            again = client.get(
+                "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+            )
+            assert again.status_code == 200
+            assert again.json()["full_name"] == "New Patched Name"
+    finally:
+        _teardown_profile(NAME_SUB)
+
+
+def test_patch_auth_me_requires_auth(client: TestClient) -> None:
+    response = client.patch("/api/v1/auth/me", json={"full_name": "No One"})
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
 def test_auth_me_rls_isolation_through_request_session(client: TestClient) -> None:
     """T029 / US2 AC4 / FR-007: the request session runs under contextly_app
     with the caller's claim — user A sees A's profile, never user B's.

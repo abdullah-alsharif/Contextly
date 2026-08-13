@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { listConversations, signOutLocally, type Conversation } from "@/lib/api-client";
+import { getProfile, listConversations, signOutLocally, type Conversation } from "@/lib/api-client";
 
 const NAV_ITEMS = [
   { href: "/documents", label: "Documents", icon: "description" },
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
 export default function Sidebar() {
   const pathname = usePathname();
   const [recent, setRecent] = useState<Conversation[]>([]);
+  const [fullName, setFullName] = useState<string>("");
   const [email, setEmail] = useState<string>("");
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const confirmRef = useRef<HTMLDivElement>(null);
@@ -23,10 +24,24 @@ export default function Sidebar() {
     if (confirmSignOut) confirmRef.current?.focus({ preventScroll: true });
   }, [confirmSignOut]);
 
-  // Recents: mount fetch + 5s poll (same as use-documents).
+  // Recents + user chip: mount fetch + 5s poll; "profile:updated" from
+  // Settings refreshes the chip immediately on save.
   useEffect(() => {
     let cancelled = false;
-    const refreshRecent = () => {
+    const refreshProfile = () => {
+      void getProfile()
+        .then((profile) => {
+          if (cancelled) return;
+          setFullName(profile.full_name ?? "");
+          setEmail(profile.email);
+        })
+        .catch(() => {
+          // chip keeps the last known identity
+        });
+    };
+    const onProfileUpdated = () => refreshProfile();
+    window.addEventListener("profile:updated", onProfileUpdated);
+    const refresh = () => {
       void listConversations()
         .then((rows) => {
           if (!cancelled) setRecent(rows.slice(0, 5));
@@ -34,17 +49,13 @@ export default function Sidebar() {
         .catch(() => {
           // sidebar renders without recents
         });
+      refreshProfile();
     };
-    refreshRecent();
-    const timer = window.setInterval(refreshRecent, 5000);
-    fetch("/api/v1/auth/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((profile) => {
-        if (profile && !cancelled) setEmail(profile.email ?? "");
-      })
-      .catch(() => {});
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
     return () => {
       cancelled = true;
+      window.removeEventListener("profile:updated", onProfileUpdated);
       window.clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -134,10 +145,12 @@ export default function Sidebar() {
           }))}
 
         <div className="mt-2 flex items-center gap-2.5 rounded-lg bg-surface-container-low px-stack-sm py-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-secondary">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary">
             <span className="material-symbols-outlined fill text-sm text-on-secondary">person</span>
           </span>
-          <p className="min-w-0 flex-1 truncate text-label-sm text-on-surface">{email || "Signed in"}</p>
+          <p className="min-w-0 flex-1 truncate text-label-sm text-on-surface">
+            {fullName || email || "Signed in"}
+          </p>
           <div className="relative">
             <button
               type="button"

@@ -13,10 +13,16 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export async function POST(request: Request) {
   let email = "";
   let password = "";
+  let fullName = "";
   try {
-    const body = (await request.json()) as { email?: unknown; password?: unknown };
+    const body = (await request.json()) as {
+      email?: unknown;
+      password?: unknown;
+      fullName?: unknown;
+    };
     email = typeof body.email === "string" ? body.email.trim() : "";
     password = typeof body.password === "string" ? body.password : "";
+    fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
@@ -30,10 +36,16 @@ export async function POST(request: Request) {
       { status: 422 },
     );
   }
+  if (fullName.length > 120) {
+    return NextResponse.json(
+      { error: "Full name must be at most 120 characters." },
+      { status: 422 },
+    );
+  }
 
   if (isDevAuthMode()) {
     // Dev mode: "sign-up" is the same credential-free token mint (local-dev.md §3).
-    const token = await mintDevToken(email);
+    const token = await mintDevToken(email, fullName);
     const response = NextResponse.json({ ok: true });
     response.cookies.set(DEV_TOKEN_COOKIE, token, {
       path: "/",
@@ -44,7 +56,11 @@ export async function POST(request: Request) {
   }
 
   const supabase = createServerSupabaseClient();
-  const { error } = await supabase.auth.signUp({ email, password });
+  const { error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { full_name: fullName || undefined } },
+  });
   if (error) {
     const message =
       error.status === 400
