@@ -37,6 +37,12 @@ export interface Conversation {
   updated_at: string;
 }
 
+/** A search result: the conversation plus a preview snippet of the newest
+ * matching message (null for title-only matches). */
+export interface ConversationSearchResult extends Conversation {
+  preview: string | null;
+}
+
 export interface ConversationDetail {
   conversation: Conversation;
   documents: Document[];
@@ -244,6 +250,17 @@ export async function downloadDocument(id: string): Promise<Blob> {
 export function listConversations(archived = false): Promise<Conversation[]> {
   return request<Conversation[]>(
     `/api/v1/conversations${archived ? "?archived=true" : ""}`,
+  );
+}
+
+/** Ranked title/message search (docs/api.md §3), paged 5 at a time. */
+export function searchConversations(
+  q: string,
+  offset = 0,
+  limit = 5,
+): Promise<ConversationSearchResult[]> {
+  return request<ConversationSearchResult[]>(
+    `/api/v1/conversations?q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`,
   );
 }
 

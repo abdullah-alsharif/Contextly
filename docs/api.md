@@ -82,7 +82,7 @@ fully usable — the failed replacement row itself leaves the active set.
 | Method | URL | Body | Response | Errors |
 |---|---|---|---|---|
 | POST | `/conversations` | `{ "title"?, "document_ids": [uuid] }` | `201 {conversation}` | 404 (bad or unowned doc id — deliberately ambiguous, anti-enumeration), 401 |
-| GET | `/conversations` | `?archived=true` lists archived only | `200 [{conversation}]` (pinned first, then `updated_at` desc; archived excluded by default) | 401 |
+| GET | `/conversations` | `?archived=true` lists archived only; `?q=…` searches instead (see below; paged by `offset`/`limit`) | `200 [{conversation}]` (pinned first, then `updated_at` desc; archived excluded by default) | 401, 422 (`q` > 200 chars, `offset` < 0, `limit` outside 1–50) |
 | GET | `/conversations/{id}` | – | `200 {conversation, documents: [document]}` | 404 |
 | PATCH | `/conversations/{id}` | `{ "title"?, "document_ids"?: [uuid], "pinned"?: bool, "archived"?: bool }` | `200 {conversation}` | 404, 422 |
 | DELETE | `/conversations/{id}` | – | `204` | 404 |
@@ -100,6 +100,18 @@ Conversation object:
   "created_at": "…", "updated_at": "…"
 }
 ```
+
+Search (`?q=`): the sidebar "Search chats" feature. Case-insensitive match
+over the caller's conversation **titles** and **message content** (user and
+assistant), including archived conversations. Results are ranked — exact
+title match, then partial title match, then message-content match, newest
+`updated_at` first within each tier (id as final tiebreaker) — paged by
+`offset`/`limit` (`limit` 1–50, `offset` ≥ 0; the frontend fetches 5 at a
+time and appends while scrolling), and each result is the conversation
+object plus a `preview` field: a short ellipsized snippet of the newest
+matching message (null for title-only matches). Blank `q` falls back to the
+normal list; `offset`/`limit` and `?archived=true` are ignored while `q` is
+absent. Search never reads documents, UI labels, or other tenants' data.
 
 ## 4. Messages
 

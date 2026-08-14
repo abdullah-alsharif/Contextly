@@ -14,7 +14,7 @@ from typing import Any
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import enforce_general_rate_limit
@@ -25,6 +25,7 @@ from app.schemas.conversation import (
     ConversationDetailOut,
     ConversationIn,
     ConversationOut,
+    ConversationSearchOut,
 )
 from app.services.conversations import (
     ConversationNotFoundError,
@@ -34,6 +35,7 @@ from app.services.conversations import (
     get_conversation,
     get_selected_documents,
     list_conversations,
+    search_conversations,
     update_conversation,
 )
 
@@ -62,14 +64,42 @@ async def create_conversation_endpoint(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("", response_model=list[ConversationOut])
+@router.get("", response_model=list[ConversationSearchOut])
 async def list_conversations_endpoint(
+    q: str | None = Query(
+        default=None,
+        max_length=200,
+        description="Case-insensitive search over the caller's conversation "
+        "titles and message content, including archived ones (docs/api.md §3).",
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Search pagination: skip this many ranked matches. "
+        "Only used together with `q` (docs/api.md §3).",
+    ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=50,
+        description="Search pagination: page size. Only used together with "
+        "`q` (docs/api.md §3).",
+    ),
     archived: bool = False,
     identity: Identity = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """The caller's conversations: pinned first then newest; archived ones
-    only when `?archived=true` (docs/api.md §3, docs/chat.md §7)."""
+    only when `?archived=true` (docs/api.md §3, docs/chat.md §7).
+
+    With `?q=`, returns ranked search results instead — title and message
+    content, archived included, each with a `preview` snippet, paged by
+    `offset`/`limit` (docs/api.md §3); `archived` is ignored then.
+    """
+    if q and q.strip():
+        return await search_conversations(
+            db, identity, query=q.strip(), limit=limit, offset=offset
+        )
     return await list_conversations(db, identity, archived=archived)
 
 

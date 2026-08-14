@@ -120,6 +120,48 @@ def _seed_document(
     conn.commit()
 
 
+def _seed_conversation(
+    conn: psycopg.Connection,
+    *,
+    user: uuid.UUID,
+    title: str,
+    updated_at: str,
+    archived: bool = False,
+) -> str:
+    """Insert a conversation with a controlled updated_at (search ranking)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into conversations (user_id, title, archived_at, updated_at)
+            values (%s, %s, %s, %s)
+            returning id
+            """,
+            (user, title, "2025-11-01T10:00:00Z" if archived else None, updated_at),
+        )
+        conversation_id = cur.fetchone()[0]
+    conn.commit()
+    return conversation_id
+
+
+def _seed_message(
+    conn: psycopg.Connection,
+    *,
+    conversation_id: str,
+    role: str,
+    content: str,
+    created_at: str,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into messages (conversation_id, role, content, created_at)
+            values (%s, %s, %s, %s)
+            """,
+            (conversation_id, role, content, created_at),
+        )
+    conn.commit()
+
+
 @pytest.fixture(scope="module")
 def seeded() -> None:
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
@@ -380,6 +422,260 @@ def test_pin_and_archive_are_tenant_scoped(client: TestClient, seeded: None) -> 
     ).json()
     row = next(row for row in body if row["id"] == conv)
     assert row["pinned"] is False and row["archived"] is False
+
+
+# ---------------------------------------------------------------------------
+# Search (?q=): titles + message content, case-insensitive, ranked
+# ---------------------------------------------------------------------------
+
+
+def _search(client: TestClient, token: str, q: str) -> list[dict]:
+    response = client.get(
+        f"/api/v1/conversations?q={q}", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_search_matches_title_case_insensitive(client: TestClient, seeded: None) -> None:
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        conversation_id = _seed_conversation(
+            conn,
+            user=USER_A,
+            title="مشاريع احترافية باستخدام Supabase",
+            updated_at="2026-01-02T10:00:00Z",
+        )
+    results = _search(client, _token(USER_A), "supabase")
+    assert [row["id"] for row in results] == [str(conversation_id)]
+    assert results[0]["preview"] is None  # title match → no content preview
+
+
+def test_search_matches_user_and_assistant_messages(
+    client: TestClient, seeded: None
+) -> None:
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        conversation_id = _seed_conversation(
+            conn, user=USER_A, title="Retrieval deep dive", updated_at="2026-01-02T10:00:00Z"
+        )
+        _seed_message(
+            conn,
+            conversation_id=conversation_id,
+            role="user",
+            content="Explain the retrieval-quality harness شرح بالعربي",
+            created_at="2026-01-02T10:01:00Z",
+        )
+        _seed_message(
+            conn,
+            conversation_id=conversation_id,
+            role="assistant",
+            content="The retrieval-quality harness measures accuracy end to end.",
+            created_at="2026-01-02T10:02:00Z",
+        )
+    results = _search(client, _token(USER_A), "Retrieval")
+    assert [row["id"] for row in results] == [str(conversation_id)]
+    preview = results[0]["preview"]
+    assert preview is not None and "retrieval-quality harness" in preview
+
+
+def test_search_ranks_exact_title_then_partial_then_content(
+    client: TestClient, seeded: None
+) -> None:
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        exact = _seed_conversation(
+            conn, user=USER_A, title="RAG", updated_at="2026-01-01T10:00:00Z"
+        )
+        partial = _seed_conversation(
+            conn, user=USER_A, title="AWS بدون RAG", updated_at="2026-01-02T10:00:00Z"
+        )
+        content = _seed_conversation(
+            conn,
+            user=USER_A,
+            title="Senior Code Review Prompt",
+            updated_at="2026-01-03T10:00:00Z",
+        )
+        _seed_message(
+            conn,
+            conversation_id=content,
+            role="user",
+            content="What is the RAG architecture here?",
+            created_at="2026-01-03T10:01:00Z",
+        )
+    ids = [row["id"] for row in _search(client, _token(USER_A), "RAG")]
+    assert ids == [str(exact), str(partial), str(content)]
+
+
+def test_search_content_matches_order_newest_first(
+    client: TestClient, seeded: None
+) -> None:
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        older = _seed_conversation(
+            conn, user=USER_A, title="Project notes", updated_at="2026-01-01T10:00:00Z"
+        )
+        newer = _seed_conversation(
+            conn, user=USER_A, title="Project notes 2", updated_at="2026-01-02T10:00:00Z"
+        )
+        for conversation_id, ts in ((older, "10:01"), (newer, "10:02")):
+            _seed_message(
+                conn,
+                conversation_id=conversation_id,
+                role="user",
+                content="The Email for Saturday plan",
+                created_at=f"2026-01-02T{ts}:00Z",
+            )
+    ids = [row["id"] for row in _search(client, _token(USER_A), "Saturday")]
+    assert ids == [str(newer), str(older)]
+
+
+def test_search_includes_archived_conversations(
+    client: TestClient, seeded: None
+) -> None:
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        archived = _seed_conversation(
+            conn,
+            user=USER_A,
+            title="Old Supabase migration notes",
+            updated_at="2025-12-01T10:00:00Z",
+            archived=True,
+        )
+    results = _search(client, _token(USER_A), "supabase")
+    row = next(row for row in results if row["id"] == str(archived))
+    assert row["archived"] is True
+
+
+def test_search_is_tenant_scoped(client: TestClient, seeded: None) -> None:
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        _seed_conversation(
+            conn,
+            user=USER_B,
+            title="B's secret Supabase plan",
+            updated_at="2026-01-02T10:00:00Z",
+        )
+    results = _search(client, _token(USER_A), "supabase")
+    assert all(row["title"] != "B's secret Supabase plan" for row in results)
+
+
+def test_search_excludes_deleted_conversations(
+    client: TestClient, seeded: None
+) -> None:
+    token = _token(USER_A)
+    status, created = _create(client, token, title="Deleted Supabase notes")
+    assert status == 201
+    assert (
+        client.delete(
+            f"/api/v1/conversations/{created['id']}",
+            headers={"Authorization": f"Bearer {token}"},
+        ).status_code
+        == 204
+    )
+    results = _search(client, token, "supabase")
+    assert created["id"] not in [row["id"] for row in results]
+
+
+def test_search_preview_is_bounded_snippet(client: TestClient, seeded: None) -> None:
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        conversation_id = _seed_conversation(
+            conn, user=USER_A, title="Long read", updated_at="2026-01-02T10:00:00Z"
+        )
+        long_content = " ".join(["the word zebra-herring appears"] + ["padding words"] * 200)
+        _seed_message(
+            conn,
+            conversation_id=conversation_id,
+            role="user",
+            content=long_content,
+            created_at="2026-01-02T10:01:00Z",
+        )
+    results = _search(client, _token(USER_A), "zebra-herring")
+    assert len(results) == 1
+    assert len(results[0]["preview"]) <= 200  # SEARCH_PREVIEW_CHARS + ellipses
+    assert "zebra-herring" in results[0]["preview"]
+
+
+def test_search_blank_and_too_long_queries(client: TestClient, seeded: None) -> None:
+    token = _token(USER_A)
+    _, created = _create(client, token, title="plain list")
+    # Whitespace-only q falls back to the normal list.
+    body = client.get(
+        "/api/v1/conversations?q=%20%20%20",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert body.status_code == 200
+    assert created["id"] in [row["id"] for row in body.json()]
+    # Over the 200-char cap → 422.
+    response = client.get(
+        f"/api/v1/conversations?q={'x' * 201}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
+def test_search_pages_results_with_offset_and_limit(
+    client: TestClient, seeded: None
+) -> None:
+    """Infinite-scroll pagination: stable order across pages
+    (tier → updated_at desc → id), page 2 continues where page 1 stopped."""
+    token = _token(USER_A)
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        ids: list[str] = []
+        for index in range(9):
+            ids.append(
+                _seed_conversation(
+                    conn,
+                    user=USER_A,
+                    title=f"paginate-page-{index}",
+                    updated_at=f"2026-01-0{(index % 9) + 1}T10:00:00Z",
+                )
+            )
+    page1 = client.get(
+        "/api/v1/conversations?q=paginate-page&limit=7&offset=0",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert page1.status_code == 200
+    rows1 = page1.json()
+    assert len(rows1) == 7
+    # Seed dates ascend with index, so the ranked order (newest first) is
+    # the reverse; the id tiebreaker makes the window deterministic.
+    expected_order = [str(uuid) for uuid in reversed(ids)]
+    assert [row["id"] for row in rows1] == expected_order[:7]
+    page2 = client.get(
+        "/api/v1/conversations?q=paginate-page&limit=7&offset=7",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert page2.status_code == 200
+    rows2 = page2.json()
+    assert len(rows2) == 2
+    assert [row["id"] for row in rows2] == expected_order[7:]
+    # No overlap between pages — a stable ranked window.
+    assert not set(row["id"] for row in rows1) & set(row["id"] for row in rows2)
+    # Offset beyond the result set → empty, not an error.
+    beyond = client.get(
+        "/api/v1/conversations?q=paginate-page&limit=7&offset=14",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert beyond.status_code == 200
+    assert beyond.json() == []
+
+
+def test_search_pagination_validation(client: TestClient, seeded: None) -> None:
+    token = _token(USER_A)
+    for query in (
+        "/api/v1/conversations?q=supabase&offset=-1",
+        "/api/v1/conversations?q=supabase&limit=0",
+        "/api/v1/conversations?q=supabase&limit=51",
+    ):
+        response = client.get(query, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 422, query
+    # Without q, offset/limit are ignored (plain list, no pagination).
+    plain = client.get(
+        "/api/v1/conversations?offset=7&limit=7",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert plain.status_code == 200
+    assert all(row.get("preview") is None for row in plain.json())
+
+
+def test_search_unauthenticated_is_401(client: TestClient, seeded: None) -> None:
+    response = client.get("/api/v1/conversations?q=supabase")
+    assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------

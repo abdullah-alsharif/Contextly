@@ -23,6 +23,7 @@
   --sb-input-bg: #ffffff;
   --sb-input-border: #d9d9d9;
   --sb-scrollbar: #d9d9d9;
+  --sb-skeleton: #e9e9e9;
 }
 @media (prefers-color-scheme: dark) {
   .sb-root {
@@ -39,6 +40,7 @@
     --sb-input-bg: #212121;
     --sb-input-border: #3a3a3a;
     --sb-scrollbar: #3a3a3a;
+    --sb-skeleton: #262626;
   }
 }
 
@@ -168,6 +170,55 @@ body {
   }
   .fade-in {
     animation: fadeIn 150ms ease-out;
+  }
+}
+
+/* Search results skeleton — neutral blocks with a slow shimmer. */
+.sb-skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background-color: var(--sb-skeleton, #e9e9e9);
+}
+.sb-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.32) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s ease-in-out infinite;
+}
+@keyframes skeletonShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sb-skeleton::after {
+    animation: none;
+  }
+}
+
+/* Search results arrival — subtle 140ms fade. */
+@keyframes resultsIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .results-in {
+    animation: resultsIn 140ms ease-out;
   }
 }
 

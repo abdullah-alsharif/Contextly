@@ -1,4 +1,5 @@
-// Slim h-16 title band for non-chat pages — mirrors the topbar's height and
+// Slim h-16 title band for non-chat pages — page title + subtitle, anchored
+// to the top edge.
 // horizontal rhythm without the search/upload controls.
 export default function PageTitleBar({
   title,

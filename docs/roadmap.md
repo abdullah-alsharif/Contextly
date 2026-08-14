@@ -89,6 +89,9 @@ other; definitions of done are explicit. Parallelizable tracks are marked ⚡.
 ## Phase 12 — Polish + post-MVP eval rounds
 - Fine-tune chunk size/top-K/ef_search from eval results; document trade-offs; write the
   portfolio README + architecture summary with the Mermaid diagrams from `docs/`.
+- Search chats popup rebuilt to the compact ChatGPT reference overlay (borderless
+  16px query header, Clear/divider/X, ~70px rows with relative dates,
+  5-at-a-time infinite scroll) — see docs/frontend-design.md "Search popup".
 
 ## Dependency graph
 

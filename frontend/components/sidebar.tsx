@@ -1,11 +1,13 @@
 "use client";
 
-// Sidebar — ChatGPT-style neutral navigation: brand, nav, New Conversation,
-// Pinned/Recents, Archive view, account chip. Desktop column; mobile drawer.
-// Palette from .sb-root tokens (globals.css), light/dark follow the OS.
+// Sidebar — ChatGPT-style neutral navigation: brand + search, nav, New
+// Conversation, Pinned/Recents, Archive view, account chip. Desktop column;
+// mobile drawer. Search opens as a centered dialog. Palette from .sb-root
+// tokens (globals.css), light/dark follow the OS.
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import ConversationSearch from "@/components/conversation-search";
 import SidebarConversationRow, {
   type RowActions,
 } from "@/components/sidebar-conversation-row";
@@ -16,6 +18,7 @@ import {
   signOutLocally,
   updateConversation,
   type Conversation,
+  type ConversationSearchResult,
 } from "@/lib/api-client";
 
 const NAV_ITEMS = [
@@ -24,6 +27,15 @@ const NAV_ITEMS = [
 ];
 
 type View = "list" | "archived";
+
+const SEARCH_RECENTS = 7;
+
+/** Query + results preserved while a result is opened, so returning to
+ * Search restores the previous experience. */
+interface PreservedSearch {
+  query: string;
+  results: ConversationSearchResult[];
+}
 
 function Brand() {
   return (
@@ -355,7 +367,13 @@ export default function Sidebar() {
   const [email, setEmail] = useState<string>("");
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchPreserved, setSearchPreserved] = useState<PreservedSearch | null>(
+    null,
+  );
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const searchOpenRef = useRef(false);
+  searchOpenRef.current = searchOpen;
 
   const refresh = useCallback(async () => {
     try {
@@ -470,7 +488,42 @@ export default function Sidebar() {
     onDelete: remove,
   };
 
-  // Drawer closes on navigation, Escape, or overlay click.
+  // Search popup: opening a result preserves query + results; dismissing resets.
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const closeSearch = useCallback(() => {
+    setSearchPreserved(null);
+    setSearchOpen(false);
+  }, []);
+  const openSearchResult = useCallback(
+    (query: string, results: ConversationSearchResult[]) => {
+      // Recents clicks carry an empty query — nothing worth preserving.
+      if (query.trim()) setSearchPreserved({ query, results });
+      setSearchOpen(false);
+    },
+    [],
+  );
+
+  // Cmd/Ctrl+K toggles search on desktop.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") {
+        return;
+      }
+      if (!window.matchMedia("(min-width: 768px)").matches) return;
+      event.preventDefault();
+      if (searchOpenRef.current) {
+        setSearchPreserved(null);
+        setSearchOpen(false);
+      } else {
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Drawer closes on navigation, Escape, or overlay click. Escape inside the
+  // search popup belongs to the search.
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   useEffect(() => {
     if (drawerOpen) closeDrawer();
@@ -482,7 +535,7 @@ export default function Sidebar() {
   useEffect(() => {
     if (!drawerOpen) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeDrawer();
+      if (event.key === "Escape" && !searchOpenRef.current) closeDrawer();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -512,8 +565,19 @@ export default function Sidebar() {
     <>
       {/* Desktop: persistent column */}
       <aside className="sb-root hidden w-[272px] shrink-0 flex-col border-r border-sb-border bg-sb-bg md:flex">
-        <div className="px-4 pb-2 pt-4">
+        <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-4">
           <Brand />
+          <button
+            type="button"
+            onClick={openSearch}
+            aria-label="Search conversations"
+            title="Search conversations"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sb-icon transition-colors duration-100 hover:bg-sb-hover hover:text-sb-text"
+          >
+            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+              search
+            </span>
+          </button>
         </div>
         <NavLinks pathname={pathname} />
         <NewChatLink />
@@ -549,23 +613,47 @@ export default function Sidebar() {
           <aside className="sb-root drawer-in absolute inset-y-0 left-0 flex w-[272px] flex-col bg-sb-bg shadow-lg">
             <div className="flex h-16 shrink-0 items-center justify-between px-4">
               <Brand />
-              <button
-                ref={drawerCloseRef}
-                type="button"
-                onClick={closeDrawer}
-                aria-label="Close navigation"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-sb-icon transition-colors duration-100 hover:bg-sb-hover hover:text-sb-text"
-              >
-                <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
-                  close
-                </span>
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={openSearch}
+                  aria-label="Search conversations"
+                  title="Search conversations"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-sb-icon transition-colors duration-100 hover:bg-sb-hover hover:text-sb-text"
+                >
+                  <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+                    search
+                  </span>
+                </button>
+                <button
+                  ref={drawerCloseRef}
+                  type="button"
+                  onClick={closeDrawer}
+                  aria-label="Close navigation"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-sb-icon transition-colors duration-100 hover:bg-sb-hover hover:text-sb-text"
+                >
+                  <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+                    close
+                  </span>
+                </button>
+              </div>
             </div>
             <NavLinks pathname={pathname} />
             <NewChatLink />
             <SidebarBody {...bodyProps} />
           </aside>
         </div>
+      )}
+
+      {searchOpen && (
+        <ConversationSearch
+          initialQuery={searchPreserved?.query}
+          initialResults={searchPreserved?.results}
+          recents={recent.slice(0, SEARCH_RECENTS)}
+          liveConversations={[...conversations, ...archived]}
+          onClose={closeSearch}
+          onOpenConversation={openSearchResult}
+        />
       )}
     </>
   );

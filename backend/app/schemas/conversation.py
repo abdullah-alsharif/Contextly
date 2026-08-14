@@ -52,6 +52,14 @@ class ConversationOut(BaseModel):
     updated_at: datetime
 
 
+class ConversationSearchOut(ConversationOut):
+    """Search result: the conversation plus a `preview` — a snippet from the
+    newest matching message — when the match is in the messages; null for
+    title-only matches (docs/api.md §3)."""
+
+    preview: str | None = None
+
+
 class ConversationDetailOut(BaseModel):
     """Detail response: the conversation plus its selected documents."""
 

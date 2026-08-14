@@ -47,6 +47,48 @@ _SELECT_ARCHIVED_CONVERSATIONS = text(
     """
 )
 
+# Search (sidebar "Search chats", docs/api.md §3): case-insensitive title +
+# message-content match, archived included, ranked. strpos/lower (not ILIKE)
+# so input can't inject wildcards; tsvector can't express infix matches.
+_SEARCH_CONVERSATIONS = text(
+    """
+    with matching as (
+        select c.id, c.title, c.pinned, c.archived_at, c.created_at, c.updated_at,
+               case
+                   when lower(c.title) = lower(:q) then 0
+                   when strpos(lower(c.title), lower(:q)) > 0 then 1
+                   else 2
+               end as title_rank
+        from conversations c
+        where c.user_id = :user_id and c.deleted_at is null
+          and (
+              strpos(lower(c.title), lower(:q)) > 0
+              or exists (
+                  select 1 from messages m
+                  where m.conversation_id = c.id
+                    and strpos(lower(m.content), lower(:q)) > 0
+              )
+          )
+    )
+    select m.id, m.title, m.pinned, m.archived_at, m.created_at, m.updated_at,
+           m.title_rank,
+           (
+               select msg.content
+               from messages msg
+               where msg.conversation_id = m.id
+                 and strpos(lower(msg.content), lower(:q)) > 0
+               order by msg.created_at desc
+               limit 1
+           ) as matched_content
+    from matching m
+    order by m.title_rank asc, m.updated_at desc, m.id asc
+    limit :limit offset :offset
+    """
+)
+
+SEARCH_LIMIT = 50
+SEARCH_PREVIEW_CHARS = 160
+
 _SELECT_SELECTED_DOCUMENTS = text(
     """
     select d.id, d.filename, d.status, d.file_size_bytes, d.total_chunks,
@@ -196,6 +238,56 @@ async def list_conversations(
     query = _SELECT_ARCHIVED_CONVERSATIONS if archived else _SELECT_CONVERSATIONS
     result = await db.execute(query, {"user_id": str(identity.user_id)})
     return [_row_to_dict(row) for row in result.all()]
+
+
+def _match_snippet(content: str, query: str, max_chars: int = SEARCH_PREVIEW_CHARS) -> str:
+    """Preview window around the first case-insensitive match, ellipsized."""
+    content = " ".join(content.split())
+    if len(content) <= max_chars:
+        return content
+    index = content.casefold().find(query.casefold())
+    if index < 0:
+        return f"{content[:max_chars]}…"
+    start = max(index - max_chars // 3, 0)
+    end = min(start + max_chars, len(content))
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(content) else ""
+    return f"{prefix}{content[start:end]}{suffix}"
+
+
+async def search_conversations(
+    db: AsyncSession,
+    identity: Identity,
+    *,
+    query: str,
+    limit: int = SEARCH_LIMIT,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Search the caller's conversations — title and message content — with a
+    stable ranking (docs/api.md §3): exact title, then partial title, then
+    message content, newest `updated_at` first within each tier, id as final
+    tiebreaker. Archived included; each result carries a `preview` snippet of
+    the newest matching message (null for title matches). `limit`/`offset`
+    page the ranked set — the frontend fetches 5 at a time and appends."""
+    result = await db.execute(
+        _SEARCH_CONVERSATIONS,
+        {
+            "user_id": str(identity.user_id),
+            "q": query,
+            "limit": limit,
+            "offset": offset,
+        },
+    )
+    rows: list[dict[str, Any]] = []
+    for row in result.all():
+        item = _row_to_dict(row)
+        item["preview"] = (
+            _match_snippet(row.matched_content, query)
+            if row.matched_content is not None
+            else None
+        )
+        rows.append(item)
+    return rows
 
 
 async def get_conversation(
