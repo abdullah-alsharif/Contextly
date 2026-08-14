@@ -32,6 +32,7 @@ EXPECTED_INDEXES = {
     "chunks_embedding_hnsw",
     "chunks_document_idx",
     "conversations_user_updated_idx",
+    "conversations_user_pinned_updated_idx",
     "conversation_documents_document_idx",
     "messages_conversation_created_idx",
 }

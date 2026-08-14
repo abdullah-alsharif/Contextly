@@ -6,6 +6,42 @@
   color-scheme: light;
 }
 
+/* Sidebar palette (sidebar spec §2) — neutral grayscale. Scoped to .sb-root
+   (the aside + drawer) so the rest of the app keeps its light theme; dark
+   values follow the OS preference. */
+.sb-root {
+  color-scheme: light;
+  --sb-bg: #f7f7f8;
+  --sb-hover: #ececec;
+  --sb-selected: #e5e5e5;
+  --sb-pressed: #e0e3e5;
+  --sb-border: #e5e5e5;
+  --sb-text: #2d2d2d;
+  --sb-text-secondary: #6b6b6b;
+  --sb-text-muted: #8a8a8a;
+  --sb-icon: #6b6b6b;
+  --sb-input-bg: #ffffff;
+  --sb-input-border: #d9d9d9;
+  --sb-scrollbar: #d9d9d9;
+}
+@media (prefers-color-scheme: dark) {
+  .sb-root {
+    color-scheme: dark;
+    --sb-bg: #171717;
+    --sb-hover: #2a2a2a;
+    --sb-selected: #303030;
+    --sb-pressed: #3a3a3a;
+    --sb-border: #3a3a3a;
+    --sb-text: #ececec;
+    --sb-text-secondary: #a0a0a0;
+    --sb-text-muted: #737373;
+    --sb-icon: #a0a0a0;
+    --sb-input-bg: #212121;
+    --sb-input-border: #3a3a3a;
+    --sb-scrollbar: #3a3a3a;
+  }
+}
+
 body {
   @apply bg-surface text-ink-700 antialiased;
 }
@@ -58,7 +94,7 @@ body {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #e0e3e5; /* surface-variant */
+  background-color: var(--sb-scrollbar, #e0e3e5); /* sidebar spec §14 */
   border-radius: 9999px;
 }
 
@@ -86,6 +122,52 @@ body {
 @media (prefers-reduced-motion: no-preference) {
   .dialog-in {
     animation: dialogIn 220ms ease-out;
+  }
+}
+
+/* Sidebar context-menu entrance (sidebar spec §19) — 140ms fade + 2px rise. */
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .menu-in {
+    animation: menuIn 140ms ease-out;
+  }
+}
+
+/* Mobile sidebar drawer (sidebar spec §20) — short slide, no long-distance
+   motion; overlay fades. */
+@keyframes drawerIn {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .drawer-in {
+    animation: drawerIn 200ms ease-out;
+  }
+  .fade-in {
+    animation: fadeIn 150ms ease-out;
   }
 }
 

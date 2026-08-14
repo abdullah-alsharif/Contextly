@@ -23,7 +23,7 @@ DEFAULT_TITLE = "New conversation"
 
 _SELECT_CONVERSATION = text(
     """
-    select id, title, created_at, updated_at
+    select id, title, pinned, archived_at, created_at, updated_at
     from conversations
     where id = :conversation_id and user_id = :user_id and deleted_at is null
     """
@@ -31,9 +31,18 @@ _SELECT_CONVERSATION = text(
 
 _SELECT_CONVERSATIONS = text(
     """
-    select id, title, created_at, updated_at
+    select id, title, pinned, archived_at, created_at, updated_at
     from conversations
-    where user_id = :user_id and deleted_at is null
+    where user_id = :user_id and deleted_at is null and archived_at is null
+    order by pinned desc, updated_at desc
+    """
+)
+
+_SELECT_ARCHIVED_CONVERSATIONS = text(
+    """
+    select id, title, pinned, archived_at, created_at, updated_at
+    from conversations
+    where user_id = :user_id and deleted_at is null and archived_at is not null
     order by updated_at desc
     """
 )
@@ -61,16 +70,22 @@ _INSERT_CONVERSATION = text(
     """
     insert into conversations (user_id, title)
     values (:user_id, :title)
-    returning id, title, created_at, updated_at
+    returning id, title, pinned, archived_at, created_at, updated_at
     """
 )
 
 _UPDATE_CONVERSATION = text(
     """
     update conversations
-    set title = :title, updated_at = now()
+    set title       = coalesce(cast(:title as text), title),
+        pinned      = coalesce(cast(:pinned as boolean), pinned),
+        archived_at = case
+            when cast(:archived as boolean) is null then archived_at
+            when cast(:archived as boolean) then now()
+            else null end,
+        updated_at  = now()
     where id = :conversation_id and user_id = :user_id and deleted_at is null
-    returning id, title, created_at, updated_at
+    returning id, title, pinned, archived_at, created_at, updated_at
     """
 )
 
@@ -111,16 +126,12 @@ class DocumentSelectionError(Exception):
     """A selected document is not owned by the caller or not ready (→ 404)."""
 
 
-class ConversationRow(dict[str, Any]):
-    """Conversation row with attribute access (id, title, created_at, updated_at)."""
-
-    __getattr__ = dict.__getitem__
-
-
 def _row_to_dict(row: Any) -> dict[str, Any]:
     return {
         "id": row.id,
         "title": row.title,
+        "pinned": row.pinned,
+        "archived": row.archived_at is not None,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
@@ -175,10 +186,15 @@ async def create_conversation(
 
 
 async def list_conversations(
-    db: AsyncSession, identity: Identity
+    db: AsyncSession, identity: Identity, *, archived: bool = False
 ) -> list[dict[str, Any]]:
-    """The caller's conversations, newest first (docs/api.md §3)."""
-    result = await db.execute(_SELECT_CONVERSATIONS, {"user_id": str(identity.user_id)})
+    """The caller's conversations: pinned first then newest (docs/api.md §3).
+
+    Archived conversations are excluded unless `archived` is true, which
+    returns only archived ones (docs/chat.md §7).
+    """
+    query = _SELECT_ARCHIVED_CONVERSATIONS if archived else _SELECT_CONVERSATIONS
+    result = await db.execute(query, {"user_id": str(identity.user_id)})
     return [_row_to_dict(row) for row in result.all()]
 
 
@@ -228,12 +244,15 @@ async def update_conversation(
     *,
     title: str | None = None,
     document_ids: list[uuid.UUID] | None = None,
+    pinned: bool | None = None,
+    archived: bool | None = None,
 ) -> dict[str, Any]:
-    """Rename and/or fully replace the document selection (docs/api.md §3).
+    """Rename, re-pin/archive, and/or fully replace the document selection.
 
-    document_ids, when present, is a full replace: the previous selection is
+    `document_ids`, when present, is a full replace: the previous selection is
     cleared and the new one linked (empty array = clear). Any rejected
     document leaves the whole selection unchanged (validate-then-write).
+    `title`/`pinned`/`archived`, when present, are set; absent fields stay.
     """
     await get_conversation(db, identity, conversation_id)  # 404 on unowned/missing
 
@@ -249,11 +268,13 @@ async def update_conversation(
                 },
             )
 
-    if title is not None:
+    if title is not None or pinned is not None or archived is not None:
         result = await db.execute(
             _UPDATE_CONVERSATION,
             {
                 "title": title,
+                "pinned": pinned,
+                "archived": archived,
                 "conversation_id": str(conversation_id),
                 "user_id": str(identity.user_id),
             },

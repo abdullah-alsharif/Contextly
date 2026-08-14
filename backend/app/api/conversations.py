@@ -64,11 +64,13 @@ async def create_conversation_endpoint(
 
 @router.get("", response_model=list[ConversationOut])
 async def list_conversations_endpoint(
+    archived: bool = False,
     identity: Identity = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    """The caller's conversations, newest first (docs/api.md §3)."""
-    return await list_conversations(db, identity)
+    """The caller's conversations: pinned first then newest; archived ones
+    only when `?archived=true` (docs/api.md §3, docs/chat.md §7)."""
+    return await list_conversations(db, identity, archived=archived)
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetailOut)
@@ -93,7 +95,7 @@ async def update_conversation_endpoint(
     identity: Identity = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Rename and/or fully replace the document selection (docs/api.md §3)."""
+    """Rename, re-pin/archive, and/or fully replace the selection (docs/api.md §3)."""
     try:
         return await update_conversation(
             db,
@@ -101,6 +103,8 @@ async def update_conversation_endpoint(
             conversation_id,
             title=body.title,
             document_ids=body.document_ids,
+            pinned=body.pinned,
+            archived=body.archived,
         )
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

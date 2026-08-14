@@ -266,6 +266,123 @@ def test_delete_hides_conversation(client: TestClient, seeded: None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pin + archive (docs/chat.md §7)
+# ---------------------------------------------------------------------------
+
+
+def test_conversation_payload_includes_pin_and_archive_flags(
+    client: TestClient, seeded: None
+) -> None:
+    token = _token(USER_A)
+    status, body = _create(client, token)
+    assert status == 201
+    assert body["pinned"] is False
+    assert body["archived"] is False
+
+
+def test_pin_orders_conversation_first(client: TestClient, seeded: None) -> None:
+    token = _token(USER_A)
+    _, older = _create(client, token, title="older")
+    _, newer = _create(client, token, title="newer")
+
+    response = client.patch(
+        f"/api/v1/conversations/{older['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pinned": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["pinned"] is True
+
+    body = client.get(
+        "/api/v1/conversations", headers={"Authorization": f"Bearer {token}"}
+    ).json()
+    ids = [row["id"] for row in body]
+    assert ids.index(older["id"]) < ids.index(newer["id"])  # pinned first
+
+    response = client.patch(
+        f"/api/v1/conversations/{older['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pinned": False},
+    )
+    assert response.json()["pinned"] is False
+    # The unpin PATCH bumped updated_at; bump `newer` too so ordering is
+    # purely by update time again.
+    client.patch(
+        f"/api/v1/conversations/{newer['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "newer"},
+    )
+    body = client.get(
+        "/api/v1/conversations", headers={"Authorization": f"Bearer {token}"}
+    ).json()
+    assert [row["id"] for row in body][0] == newer["id"]
+
+
+def test_archive_hides_and_lists_separately(client: TestClient, seeded: None) -> None:
+    token = _token(USER_A)
+    _, created = _create(client, token, title="to archive")
+
+    response = client.patch(
+        f"/api/v1/conversations/{created['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"archived": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["archived"] is True
+
+    body = client.get(
+        "/api/v1/conversations", headers={"Authorization": f"Bearer {token}"}
+    ).json()
+    assert created["id"] not in [row["id"] for row in body]
+
+    archived = client.get(
+        "/api/v1/conversations?archived=true",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+    assert [row["id"] for row in archived] == [created["id"]]
+
+    # Still reachable by direct link; unarchive restores it to the list.
+    status, _ = _detail(client, token, created["id"])
+    assert status == 200
+    response = client.patch(
+        f"/api/v1/conversations/{created['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"archived": False},
+    )
+    assert response.json()["archived"] is False
+    body = client.get(
+        "/api/v1/conversations", headers={"Authorization": f"Bearer {token}"}
+    ).json()
+    assert created["id"] in [row["id"] for row in body]
+
+
+def test_pin_and_archive_are_tenant_scoped(client: TestClient, seeded: None) -> None:
+    token_a = _token(USER_A)
+    token_b = _token(USER_B)
+    _, created = _create(client, token_a, title="A's conversation")
+    conv = created["id"]
+
+    response = client.patch(
+        f"/api/v1/conversations/{conv}",
+        headers={"Authorization": f"Bearer {token_b}"},
+        json={"pinned": True},
+    )
+    assert response.status_code == 404
+    response = client.patch(
+        f"/api/v1/conversations/{conv}",
+        headers={"Authorization": f"Bearer {token_b}"},
+        json={"archived": True},
+    )
+    assert response.status_code == 404
+
+    body = client.get(
+        "/api/v1/conversations", headers={"Authorization": f"Bearer {token_a}"}
+    ).json()
+    row = next(row for row in body if row["id"] == conv)
+    assert row["pinned"] is False and row["archived"] is False
+
+
+# ---------------------------------------------------------------------------
 # Ownership: cross-tenant behaves as 404 (docs/security.md §2)
 # ---------------------------------------------------------------------------
 

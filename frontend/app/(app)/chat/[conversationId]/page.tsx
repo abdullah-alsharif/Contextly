@@ -2,7 +2,9 @@
 
 // Chat workspace (docs/frontend-design.md §4; docs/chat.md §4–6): context
 // panel + streaming message list + sticky composer; citation chips open the
-// source viewer; AI Context Bar glows while pending (spec FR-014).
+// source viewer; AI Context Bar glows while pending (spec FR-014). Archived
+// conversations keep the same workspace but swap the composer for an
+// archived notice + Unarchive action.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import ChatComposer from "@/components/chat-composer";
@@ -10,7 +12,7 @@ import ChatMessage from "@/components/chat-message";
 import ContextPanel from "@/components/context-panel";
 import EmptyState from "@/components/empty-state";
 import SourceViewer from "@/components/source-viewer";
-import type { Source } from "@/lib/api-client";
+import { updateConversation, type Source } from "@/lib/api-client";
 import { useChat } from "@/lib/hooks/use-chat";
 import { useConversationDetail } from "@/lib/hooks/use-conversations";
 
@@ -24,6 +26,7 @@ export default function ConversationPage() {
     loading: conversationLoading,
     error: conversationError,
     setDocuments,
+    reload,
   } = useConversationDetail(conversationId);
   const { messages, loading: messagesLoading, streaming, error, send, retry, lastQuestion } =
     useChat(conversationId);
@@ -67,6 +70,28 @@ export default function ConversationPage() {
     return () => document.getElementById("ai-context-bar")?.classList.remove("active");
   }, [streaming]);
 
+  // The sidebar can archive/rename the open conversation — reload to reflect it.
+  useEffect(() => {
+    const onConversationsUpdated = () => reload();
+    window.addEventListener("conversations:updated", onConversationsUpdated);
+    return () =>
+      window.removeEventListener("conversations:updated", onConversationsUpdated);
+  }, [reload]);
+
+  const archived = detail?.conversation.archived ?? false;
+
+  // Unarchive from the archived footer; the sidebar refreshes via the event.
+  const handleUnarchive = useCallback(async () => {
+    if (!conversationId) return;
+    try {
+      await updateConversation(conversationId, { archived: false });
+      window.dispatchEvent(new CustomEvent("conversations:updated"));
+      reload();
+    } catch {
+      // stays archived; the Unarchive action remains available
+    }
+  }, [conversationId, reload]);
+
   // Auto-scroll: jump on new messages; while streaming, follow only when the
   // user is already near the bottom (so scrolling up isn't overridden).
   const scrollTracker = useRef<{ messageId: string | null }>({ messageId: null });
@@ -103,15 +128,19 @@ export default function ConversationPage() {
               {conversationError}
             </div>
           ) : messages.length === 0 ? (
-            <EmptyState
-              icon="waving_hand"
-              title={selectedDocuments.length ? "Ask anything" : "Select documents on the left"}
-              hint={
-                selectedDocuments.length
-                  ? "Your question will be answered from the selected documents with cited sources."
-                  : "Pick at least one ready document to use as context, then ask your first question."
-              }
-            />
+            archived ? (
+              <EmptyState icon="archive" title="This conversation has no messages" />
+            ) : (
+              <EmptyState
+                icon="waving_hand"
+                title={selectedDocuments.length ? "Ask anything" : "Select documents on the left"}
+                hint={
+                  selectedDocuments.length
+                    ? "Your question will be answered from the selected documents with cited sources."
+                    : "Pick at least one ready document to use as context, then ask your first question."
+                }
+              />
+            )
           ) : (
             <div className="mx-auto flex w-full max-w-4xl flex-col gap-stack-lg">
               {messages.map((message) => (
@@ -146,14 +175,32 @@ export default function ConversationPage() {
           )}
         </div>
 
-        <ChatComposer
-          selectedDocuments={selectedDocuments}
-          onRemoveDocument={(id) =>
-            persistSelection(selectedIds.filter((selected) => selected !== id))
-          }
-          onSend={(content) => void send(content)}
-          busy={streaming}
-        />
+        {archived ? (
+          <div className="flex flex-col items-center gap-3 border-t border-surface-variant bg-surface-container-lowest px-4 py-4">
+            <p className="text-center text-[15px] text-[#626262]">
+              This conversation is archived. To continue, please unarchive it first.
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleUnarchive()}
+              className="flex h-10 cursor-pointer items-center justify-center gap-2 rounded-full bg-[#0D0D0D] px-6 text-white transition-colors duration-150 hover:bg-[#1F1F1F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D0D0D] focus-visible:ring-offset-2"
+            >
+              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                unarchive
+              </span>
+              <span className="font-display text-label-md">Unarchive</span>
+            </button>
+          </div>
+        ) : (
+          <ChatComposer
+            selectedDocuments={selectedDocuments}
+            onRemoveDocument={(id) =>
+              persistSelection(selectedIds.filter((selected) => selected !== id))
+            }
+            onSend={(content) => void send(content)}
+            busy={streaming}
+          />
+        )}
       </div>
 
       {activeSource && (

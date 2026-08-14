@@ -31,6 +31,8 @@ export interface Document {
 export interface Conversation {
   id: string;
   title: string;
+  pinned: boolean;
+  archived: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -239,8 +241,10 @@ export async function downloadDocument(id: string): Promise<Blob> {
 
 // ---- Conversations (contracts C3) ------------------------------------------
 
-export function listConversations(): Promise<Conversation[]> {
-  return request<Conversation[]>("/api/v1/conversations");
+export function listConversations(archived = false): Promise<Conversation[]> {
+  return request<Conversation[]>(
+    `/api/v1/conversations${archived ? "?archived=true" : ""}`,
+  );
 }
 
 export function createConversation(init: {
@@ -259,7 +263,12 @@ export function getConversation(id: string): Promise<ConversationDetail> {
 
 export function updateConversation(
   id: string,
-  patch: { title?: string; document_ids?: string[] },
+  patch: {
+    title?: string;
+    document_ids?: string[];
+    pinned?: boolean;
+    archived?: boolean;
+  },
 ): Promise<Conversation> {
   return request<Conversation>(`/api/v1/conversations/${id}`, {
     method: "PATCH",

@@ -55,6 +55,8 @@ erDiagram
     uuid id PK
     uuid user_id FK
     text title
+    boolean pinned
+    timestamptz archived_at
     timestamptz created_at
     timestamptz updated_at
     timestamptz deleted_at
@@ -145,12 +147,17 @@ create table conversations (
   id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null references profiles(id) on delete cascade,
   title      text not null default 'New conversation',
+  pinned     boolean not null default false,
+  archived_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz
 );
 
 create index conversations_user_updated_idx on conversations (user_id, updated_at desc) where deleted_at is null;
+create index conversations_user_pinned_updated_idx
+    on conversations (user_id, pinned desc, updated_at desc)
+    where deleted_at is null and archived_at is null;
 
 -- A conversation only queries chunks of these documents.
 create table conversation_documents (

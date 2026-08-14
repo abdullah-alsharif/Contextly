@@ -19,12 +19,14 @@ MAX_TITLE_CHARS = 200
 
 
 class ConversationIn(BaseModel):
-    """Create/update body: optional title and optional document selection."""
+    """Create/update body: optional title, document selection, pin, archive."""
 
     title: str | None = Field(default=None, max_length=MAX_TITLE_CHARS)
     document_ids: list[uuid.UUID] | None = Field(
         default=None, max_length=MAX_DOCUMENT_IDS
     )
+    pinned: bool | None = None
+    archived: bool | None = None
 
     @field_validator("title")
     @classmethod
@@ -44,6 +46,8 @@ class ConversationOut(BaseModel):
 
     id: uuid.UUID
     title: str
+    pinned: bool
+    archived: bool
     created_at: datetime
     updated_at: datetime
 

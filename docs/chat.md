@@ -9,7 +9,7 @@ erDiagram
   documents ||--o{ conversation_documents : selected_in
 ```
 
-- `conversations(user_id, title, created_at, updated_at, deleted_at)`
+- `conversations(user_id, title, pinned, archived_at, created_at, updated_at, deleted_at)`
 - `conversation_documents(conversation_id, document_id)` — the document selection set.
 - `messages(conversation_id, role, content, sources, token counts, timings, created_at)`
 
@@ -41,9 +41,9 @@ Behavior rules:
 ## 3. API surface (see [api.md](api.md) for full details)
 
 - `POST /conversations` — create (optional `title`, optional `document_ids`)
-- `GET /conversations` — list (newest first)
+- `GET /conversations` — list (pinned first, newest; `?archived=true` lists archived)
 - `GET /conversations/{id}` — detail + selected document ids
-- `PATCH /conversations/{id}` — rename / update selected documents
+- `PATCH /conversations/{id}` — rename / update selection / pin / archive
 - `DELETE /conversations/{id}` — delete
 - `GET /conversations/{id}/messages` — history (oldest first, paginated)
 - `POST /conversations/{id}/messages` — send a question → SSE stream of the answer
@@ -89,4 +89,17 @@ if the provider reports no streaming support, return one SSE event with the full
   partial content + `status` marker shown in UI.
 - Question length cap (e.g. 4000 chars) → 422 with message.
 - Renaming: default title is "New conversation"; auto-renamed to first question
-  (truncated) if user hasn't set one — nice UX, trivial to implement.
+  (truncated) if user hasn't set one — nice UX, trivial to implement. Auto-rename
+  never overwrites a user-set title.
+
+## 7. Conversation management (pin / archive / delete)
+
+- **Delete** soft-deletes (`deleted_at`); the conversation and its messages become
+  unreachable (404 on every endpoint) — the app forgets the context.
+- **Pin** (`pinned=true`) floats the conversation above all others in the default
+  list; unpin restores recency ordering.
+- **Archive** (`archived=true`) hides the conversation from the default list;
+  `GET /conversations?archived=true` lists archived ones for restore
+  (`archived=false`). Direct links still open archived conversations.
+- Messages sent to an archived conversation (direct link) are persisted normally;
+  the conversation stays archived.

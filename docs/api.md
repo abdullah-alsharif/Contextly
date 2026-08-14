@@ -82,18 +82,22 @@ fully usable — the failed replacement row itself leaves the active set.
 | Method | URL | Body | Response | Errors |
 |---|---|---|---|---|
 | POST | `/conversations` | `{ "title"?, "document_ids": [uuid] }` | `201 {conversation}` | 404 (bad or unowned doc id — deliberately ambiguous, anti-enumeration), 401 |
-| GET | `/conversations` | – | `200 [{conversation}]` (by `updated_at` desc) | 401 |
+| GET | `/conversations` | `?archived=true` lists archived only | `200 [{conversation}]` (pinned first, then `updated_at` desc; archived excluded by default) | 401 |
 | GET | `/conversations/{id}` | – | `200 {conversation, documents: [document]}` | 404 |
-| PATCH | `/conversations/{id}` | `{ "title"?, "document_ids"?: [uuid] }` | `200 {conversation}` | 404, 422 |
+| PATCH | `/conversations/{id}` | `{ "title"?, "document_ids"?: [uuid], "pinned"?: bool, "archived"?: bool }` | `200 {conversation}` | 404, 422 |
 | DELETE | `/conversations/{id}` | – | `204` | 404 |
 
 PATCH semantics: full replace of `document_ids` when present (empty array = clear
-selection). Partial updates supported for `title`.
+selection); `title`/`pinned`/`archived` are set when present and left unchanged
+when absent. `pinned` orders the conversation first in lists; `archived` hides
+it from the default list (restorable via `archived: false`).
 
 Conversation object:
 ```json
 {
-  "id": "uuid", "title": "Job applications", "created_at": "…", "updated_at": "…"
+  "id": "uuid", "title": "Job applications",
+  "pinned": false, "archived": false,
+  "created_at": "…", "updated_at": "…"
 }
 ```
 

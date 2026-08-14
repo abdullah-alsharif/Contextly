@@ -62,6 +62,21 @@ const config: Config = {
         // Legacy alias — on-surface ink for headings/body (docs §2):
         "ink-700": "#1E293B",
         "ink-900": "#191C1E",
+        // Sidebar palette — .sb-root CSS vars in globals.css (sidebar spec
+        // §2): neutral grayscale, light/dark via prefers-color-scheme.
+        sb: {
+          bg: "var(--sb-bg)",
+          hover: "var(--sb-hover)",
+          selected: "var(--sb-selected)",
+          pressed: "var(--sb-pressed)",
+          border: "var(--sb-border)",
+          text: "var(--sb-text)",
+          "text-secondary": "var(--sb-text-secondary)",
+          "text-muted": "var(--sb-text-muted)",
+          icon: "var(--sb-icon)",
+          "input-bg": "var(--sb-input-bg)",
+          "input-border": "var(--sb-input-border)",
+        },
         success: "#10B981",
         warning: "#F59E0B",
         white: "#FFFFFF",
