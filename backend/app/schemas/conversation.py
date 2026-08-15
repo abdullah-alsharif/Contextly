@@ -48,6 +48,7 @@ class ConversationOut(BaseModel):
     title: str
     pinned: bool
     archived: bool
+    message_count: int
     created_at: datetime
     updated_at: datetime
 

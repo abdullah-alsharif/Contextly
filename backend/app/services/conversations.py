@@ -23,7 +23,8 @@ DEFAULT_TITLE = "New conversation"
 
 _SELECT_CONVERSATION = text(
     """
-    select id, title, pinned, archived_at, created_at, updated_at
+    select id, title, pinned, archived_at, created_at, updated_at,
+           (select count(*)::int from messages m where m.conversation_id = conversations.id) as message_count
     from conversations
     where id = :conversation_id and user_id = :user_id and deleted_at is null
     """
@@ -31,7 +32,8 @@ _SELECT_CONVERSATION = text(
 
 _SELECT_CONVERSATIONS = text(
     """
-    select id, title, pinned, archived_at, created_at, updated_at
+    select id, title, pinned, archived_at, created_at, updated_at,
+           (select count(*)::int from messages m where m.conversation_id = conversations.id) as message_count
     from conversations
     where user_id = :user_id and deleted_at is null and archived_at is null
     order by pinned desc, updated_at desc
@@ -40,7 +42,8 @@ _SELECT_CONVERSATIONS = text(
 
 _SELECT_ARCHIVED_CONVERSATIONS = text(
     """
-    select id, title, pinned, archived_at, created_at, updated_at
+    select id, title, pinned, archived_at, created_at, updated_at,
+           (select count(*)::int from messages m where m.conversation_id = conversations.id) as message_count
     from conversations
     where user_id = :user_id and deleted_at is null and archived_at is not null
     order by updated_at desc
@@ -72,6 +75,7 @@ _SEARCH_CONVERSATIONS = text(
     )
     select m.id, m.title, m.pinned, m.archived_at, m.created_at, m.updated_at,
            m.title_rank,
+           (select count(*)::int from messages mc where mc.conversation_id = m.id) as message_count,
            (
                select msg.content
                from messages msg
@@ -112,7 +116,8 @@ _INSERT_CONVERSATION = text(
     """
     insert into conversations (user_id, title)
     values (:user_id, :title)
-    returning id, title, pinned, archived_at, created_at, updated_at
+    returning id, title, pinned, archived_at, created_at, updated_at,
+              (select count(*)::int from messages m where m.conversation_id = conversations.id) as message_count
     """
 )
 
@@ -127,7 +132,8 @@ _UPDATE_CONVERSATION = text(
             else null end,
         updated_at  = now()
     where id = :conversation_id and user_id = :user_id and deleted_at is null
-    returning id, title, pinned, archived_at, created_at, updated_at
+    returning id, title, pinned, archived_at, created_at, updated_at,
+              (select count(*)::int from messages m where m.conversation_id = conversations.id) as message_count
     """
 )
 
@@ -174,6 +180,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "title": row.title,
         "pinned": row.pinned,
         "archived": row.archived_at is not None,
+        "message_count": row.message_count,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }

@@ -312,6 +312,15 @@ def test_send_persists_messages_with_sources(client: TestClient, seeded: None) -
     assert rows[1]["retrieval_ms"] is not None
     assert rows[1]["llm_ms"] is not None
 
+    # The conversation list reports the message count (drives the sidebar's
+    # recents filter — docs/api.md §3).
+    response = client.get(
+        "/api/v1/conversations", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    listed = {row["id"]: row for row in response.json()}
+    assert listed[conv["id"]]["message_count"] == 2
+
 
 def test_sources_snapshot_survives_document_deletion(
     client: TestClient, seeded: None

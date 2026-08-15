@@ -97,9 +97,14 @@ Conversation object:
 {
   "id": "uuid", "title": "Job applications",
   "pinned": false, "archived": false,
+  "message_count": 3,
   "created_at": "…", "updated_at": "…"
 }
 ```
+
+`message_count` is the number of messages in the conversation. The sidebar
+filters conversations with no chat history out of the recents list (a chat
+appears there once its first message is sent).
 
 Search (`?q=`): the sidebar "Search chats" feature. Case-insensitive match
 over the caller's conversation **titles** and **message content** (user and

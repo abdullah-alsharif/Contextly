@@ -234,6 +234,20 @@ def test_create_defaults_title_and_empty_selection(
     assert body["title"] == "New conversation"
 
 
+def test_new_conversation_has_zero_message_count(
+    client: TestClient, seeded: None
+) -> None:
+    token = _token(USER_A)
+    _, created = _create(client, token)
+    assert created["message_count"] == 0
+    response = client.get(
+        "/api/v1/conversations", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    rows = {row["id"]: row for row in response.json()}
+    assert rows[created["id"]]["message_count"] == 0
+
+
 def test_list_is_newest_first_by_updated_at(client: TestClient, seeded: None) -> None:
     token = _token(USER_A)
     _, first = _create(client, token, title="older")

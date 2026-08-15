@@ -631,7 +631,7 @@ export default function Sidebar() {
   );
 
   const pinned = conversations.filter((row) => row.pinned);
-  const recent = conversations.filter((row) => !row.pinned);
+  const recent = conversations.filter((row) => !row.pinned && row.message_count > 0);
 
   const rowActions: RowActions = {
     onRename: rename,

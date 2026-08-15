@@ -33,6 +33,7 @@ export interface Conversation {
   title: string;
   pinned: boolean;
   archived: boolean;
+  message_count: number;
   created_at: string;
   updated_at: string;
 }
