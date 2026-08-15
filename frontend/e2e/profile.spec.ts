@@ -23,7 +23,9 @@ test("profile: register with name → chip → edit in settings → chip updates
   await expect(sidebar.getByText(email, { exact: true })).not.toBeVisible();
 
   // -- Settings: name pre-filled, email read-only ----------------------------
-  await page.getByRole("link", { name: "Settings" }).click();
+  // Settings moved into the account menu popover.
+  await sidebar.getByRole("button", { name: "Open account menu" }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
   const nameInput = page.getByLabel("Full name");
   await expect(nameInput).toHaveValue(name);
   await expect(page.getByLabel("Email")).toBeDisabled();

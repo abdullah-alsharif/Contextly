@@ -92,6 +92,14 @@ other; definitions of done are explicit. Parallelizable tracks are marked ⚡.
 - Search chats popup rebuilt to the compact ChatGPT reference overlay (borderless
   16px query header, Clear/divider/X, ~70px rows with relative dates,
   5-at-a-time infinite scroll) — see docs/frontend-design.md "Search popup".
+- Desktop sidebar collapsible to a 64px icon rail with tooltips (persisted) —
+  see docs/frontend-design.md "Sidebar".
+- Sidebar rebuilt to the ChatGPT-style information architecture: logo header
+  with search + collapse toggle, Documents row + filled "New Conversation"
+  CTA, inline Pinned/Recents/Archived sections, account (Settings/Log out
+  popover) fixed at the bottom, hovering the rail (or clicking its
+  whitespace) expands it via the logo-area toggle,
+  medium screens start collapsed — see docs/frontend-design.md "Sidebar".
 
 ## Dependency graph
 

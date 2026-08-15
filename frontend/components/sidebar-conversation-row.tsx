@@ -186,24 +186,28 @@ export default function SidebarConversationRow({
             }}
           >
             {[
-              {
-                label: "Rename",
-                icon: "edit",
-                run: () => {
-                  cancelledRef.current = false;
-                  setDraft(conversation.title);
-                  setMenuOpen(false);
-                  setRenaming(true);
-                },
-              },
-              {
-                label: conversation.pinned ? "Unpin" : "Pin",
-                icon: conversation.pinned ? "keep_off" : "push_pin",
-                run: () => {
-                  actions.onTogglePin(conversation.id, !conversation.pinned);
-                  setMenuOpen(false);
-                },
-              },
+              ...(archived
+                ? []
+                : [
+                    {
+                      label: "Rename",
+                      icon: "edit",
+                      run: () => {
+                        cancelledRef.current = false;
+                        setDraft(conversation.title);
+                        setMenuOpen(false);
+                        setRenaming(true);
+                      },
+                    },
+                    {
+                      label: conversation.pinned ? "Unpin" : "Pin",
+                      icon: conversation.pinned ? "keep_off" : "push_pin",
+                      run: () => {
+                        actions.onTogglePin(conversation.id, !conversation.pinned);
+                        setMenuOpen(false);
+                      },
+                    },
+                  ]),
               {
                 label: archived ? "Unarchive" : "Archive",
                 icon: archived ? "unarchive" : "archive",
