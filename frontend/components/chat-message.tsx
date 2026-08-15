@@ -200,7 +200,7 @@ export default function ChatMessage({
       <span className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary">
         <span className="material-symbols-outlined fill text-sm text-on-primary">auto_awesome</span>
       </span>
-      <div className="max-w-[80%] min-w-0 flex-1">
+      <div className="max-w-[80%] min-w-0">
         <div
           className={`rounded-xl rounded-tl-none border border-outline-variant bg-surface-container-low p-4 shadow-sm ${
             failed ? "border-error-container bg-error-container/40" : ""
