@@ -8,7 +8,6 @@ import {
   getConversation,
   updateConversation,
   type ConversationDetail,
-  type Document,
 } from "@/lib/api-client";
 
 export function useConversationDetail(conversationId: string | undefined) {
@@ -16,16 +15,16 @@ export function useConversationDetail(conversationId: string | undefined) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     if (!conversationId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       setDetail(await getConversation(conversationId));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load conversation.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [conversationId]);
 
@@ -37,6 +36,7 @@ export function useConversationDetail(conversationId: string | undefined) {
     async (documentIds: string[]) => {
       if (!conversationId || !detail) return;
       await updateConversation(conversationId, { document_ids: documentIds });
+      const added = documentIds.some((id) => !detail.documents.some((doc) => doc.id === id));
       setDetail((current) =>
         current
           ? {
@@ -47,12 +47,10 @@ export function useConversationDetail(conversationId: string | undefined) {
             }
           : current,
       );
+      // PATCH returns the conversation only, so additions refetch silently.
+      if (added) await load(true);
     },
-    [conversationId, detail],
-  );
-
-  const readyDocuments = (detail?.documents ?? []).filter(
-    (doc: Document) => doc.status === "ready",
+    [conversationId, detail, load],
   );
 
   const reload = useCallback(() => void load(), [load]);
@@ -60,7 +58,6 @@ export function useConversationDetail(conversationId: string | undefined) {
   return {
     detail,
     documents: detail?.documents ?? [],
-    readyDocuments,
     loading,
     error,
     setDocuments,

@@ -1,5 +1,5 @@
 // Chat composer — mirrors prototypes/chat.html: rounded-2xl surface card
-// with border + shadow, body-md textarea, ghost attach/mic actions, square
+// with border + shadow, body-md textarea, ghost add-documents action, square
 // accent send with shadow, centered disclaimer. Blocks send when no
 // documents are selected (pre-empts the backend 400, docs/chat.md §6).
 "use client";
@@ -9,6 +9,7 @@ import { useRef, useState, type KeyboardEvent } from "react";
 interface ChatComposerProps {
   selectedDocuments: { id: string; filename: string }[];
   onRemoveDocument: (id: string) => void;
+  onAddDocuments: () => void;
   onSend: (content: string) => void;
   busy: boolean;
 }
@@ -16,6 +17,7 @@ interface ChatComposerProps {
 export default function ChatComposer({
   selectedDocuments,
   onRemoveDocument,
+  onAddDocuments,
   onSend,
   busy,
 }: ChatComposerProps) {
@@ -69,7 +71,18 @@ export default function ChatComposer({
         </div>
       )}
 
-      <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+      <div className="flex items-end gap-2 rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+        <button
+          type="button"
+          onClick={onAddDocuments}
+          title="Add documents"
+          aria-label="Add documents"
+          className="shrink-0 rounded p-1 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-secondary lg:hidden"
+        >
+          <span className="material-symbols-outlined" aria-hidden="true">
+            add
+          </span>
+        </button>
         <textarea
           ref={textareaRef}
           value={value}
@@ -88,35 +101,17 @@ export default function ChatComposer({
                 : "Ask a question about your documents..."
           }
           aria-label="Message"
-          className="custom-scrollbar w-full resize-none bg-transparent p-4 text-body-md outline-none placeholder:text-on-surface-variant/70"
+          className="custom-scrollbar min-w-0 flex-1 resize-none bg-transparent text-body-md outline-none placeholder:text-on-surface-variant/70"
         />
-        <div className="flex items-center justify-between px-4 pb-3">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              title="Attach file"
-              className="rounded p-1 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-secondary"
-            >
-              <span className="material-symbols-outlined">attach_file</span>
-            </button>
-            <button
-              type="button"
-              title="Voice input"
-              className="rounded p-1 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-secondary"
-            >
-              <span className="material-symbols-outlined">mic</span>
-            </button>
-          </div>
-          <button
-            type="button"
-            disabled={!canSend}
-            onClick={() => submit(value)}
-            aria-label="Send message"
-            className="flex items-center justify-center rounded-lg bg-secondary p-2 text-on-secondary shadow-sm transition-transform hover:bg-secondary/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <span className="material-symbols-outlined fill">send</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          disabled={!canSend}
+          onClick={() => submit(value)}
+          aria-label="Send message"
+          className="flex shrink-0 items-center justify-center rounded-lg bg-secondary p-2 text-on-secondary shadow-sm transition-transform hover:bg-secondary/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <span className="material-symbols-outlined fill">send</span>
+        </button>
       </div>
 
       <p className="mt-2 flex items-center justify-center gap-1 font-display text-label-sm text-on-surface-variant">

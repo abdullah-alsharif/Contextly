@@ -56,7 +56,9 @@ export default function ChatPage() {
           disabled={creating}
           className="mt-4 flex items-center gap-2 rounded-lg bg-secondary px-4 py-2 font-display text-label-md text-white transition-colors enabled:hover:bg-secondary-fixed-dim disabled:opacity-60"
         >
-          <span className="material-symbols-outlined text-label-md">add_comment</span>
+          <span className="material-symbols-outlined text-label-md" aria-hidden="true">
+            add_comment
+          </span>
           {creating ? "Creating…" : "New Conversation"}
         </button>
         {error && (

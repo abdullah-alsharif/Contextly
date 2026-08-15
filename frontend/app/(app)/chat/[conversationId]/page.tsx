@@ -10,11 +10,13 @@ import { useParams } from "next/navigation";
 import ChatComposer from "@/components/chat-composer";
 import ChatMessage from "@/components/chat-message";
 import ContextPanel from "@/components/context-panel";
+import DocumentPicker from "@/components/document-picker";
 import EmptyState from "@/components/empty-state";
 import SourceViewer from "@/components/source-viewer";
 import { updateConversation, type Source } from "@/lib/api-client";
 import { useChat } from "@/lib/hooks/use-chat";
 import { useConversationDetail } from "@/lib/hooks/use-conversations";
+import { useDocuments } from "@/lib/hooks/use-documents";
 
 export default function ConversationPage() {
   const params = useParams<{ conversationId: string }>();
@@ -22,7 +24,6 @@ export default function ConversationPage() {
 
   const {
     detail,
-    readyDocuments,
     loading: conversationLoading,
     error: conversationError,
     setDocuments,
@@ -30,8 +31,14 @@ export default function ConversationPage() {
   } = useConversationDetail(conversationId);
   const { messages, loading: messagesLoading, streaming, error, send, retry, lastQuestion } =
     useChat(conversationId);
+  const { documents: allDocuments } = useDocuments();
+  const allReadyDocuments = useMemo(
+    () => allDocuments.filter((doc) => doc.status === "ready"),
+    [allDocuments],
+  );
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [activeSource, setActiveSource] = useState<Source | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -58,8 +65,8 @@ export default function ConversationPage() {
   );
 
   const selectedDocuments = useMemo(
-    () => readyDocuments.filter((doc) => selectedIds.includes(doc.id)),
-    [readyDocuments, selectedIds],
+    () => allReadyDocuments.filter((doc) => selectedIds.includes(doc.id)),
+    [allReadyDocuments, selectedIds],
   );
 
   // AI Context Bar state (spec FR-014).
@@ -114,9 +121,10 @@ export default function ConversationPage() {
   return (
     <div className="flex h-full bg-surface-container-lowest">
       <ContextPanel
-        readyDocuments={readyDocuments}
+        readyDocuments={allReadyDocuments}
         selectedIds={selectedIds}
         setSelectedIds={persistSelection}
+        defaultSelectedOnly
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -197,11 +205,24 @@ export default function ConversationPage() {
             onRemoveDocument={(id) =>
               persistSelection(selectedIds.filter((selected) => selected !== id))
             }
+            onAddDocuments={() => setPickerOpen(true)}
             onSend={(content) => void send(content)}
             busy={streaming}
           />
         )}
       </div>
+
+      {pickerOpen && (
+        <DocumentPicker
+          readyDocuments={allReadyDocuments}
+          selectedIds={selectedIds}
+          onAdd={(ids) => {
+            persistSelection(Array.from(new Set([...selectedIds, ...ids])));
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
 
       {activeSource && (
         <SourceViewer

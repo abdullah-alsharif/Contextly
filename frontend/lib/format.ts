@@ -11,3 +11,15 @@ export function formatDate(iso: string): string {
     day: "numeric",
   });
 }
+
+const FILE_ICONS: Record<string, string> = {
+  pdf: "picture_as_pdf",
+  txt: "description",
+  md: "description",
+  csv: "description",
+  json: "description",
+};
+
+export function fileIcon(filename: string): string {
+  return FILE_ICONS[filename.split(".").pop()?.toLowerCase() ?? ""] ?? "text_snippet";
+}
