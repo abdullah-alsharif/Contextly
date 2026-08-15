@@ -18,6 +18,7 @@ import {
   type Conversation,
   type ConversationSearchResult,
 } from "@/lib/api-client";
+import { formatDateRelative } from "@/lib/format";
 
 const DEBOUNCE_MS = 200;
 const PAGE_SIZE = 5;
@@ -59,26 +60,6 @@ function highlightText(text: string, query: string): ReactNode {
   return parts;
 }
 
-/** Today / Yesterday / MMM D / MMM D, YYYY. */
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  const now = new Date();
-  const dayMs = 86_400_000;
-  const dayDiff = Math.floor(
-    (Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) -
-      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())) /
-      dayMs,
-  );
-  if (dayDiff <= 0) return "Today";
-  if (dayDiff === 1) return "Yesterday";
-  const sameYear = date.getFullYear() === now.getFullYear();
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
-}
-
 function SearchResultRow({
   conversation,
   preview,
@@ -109,7 +90,7 @@ function SearchResultRow({
             {highlightText(conversation.title, query)}
           </span>
           <time className="shrink-0 text-[13px] leading-[20px] text-[#777777]">
-            {formatDate(conversation.updated_at)}
+            {formatDateRelative(conversation.updated_at)}
           </time>
         </span>
         {preview && (
@@ -296,7 +277,7 @@ export default function ConversationSearch({
     rows[next]?.focus();
   };
 
-const trimmed = query.trim();
+  const trimmed = query.trim();
   const showRecents = status === "idle";
   const showSkeleton = status === "searching" && trimmed !== "";
   const showNoResults = status === "done" && results.length === 0 && trimmed !== "";

@@ -396,16 +396,13 @@ async def get_document_download_url(
 ) -> tuple[str, datetime]:
     """Mint a short-lived signed URL for one of the caller's documents.
 
-    docs/api.md §5 (5 min), docs/multi-tenancy.md §4: objects are never public;
-    this returns a signed URL that expires quickly. Owner-only — a foreign or
-    missing id raises DocumentNotFoundError (404, docs/security.md §2
-    anti-enumeration), so a caller can never learn another tenant's object key.
-
-    Expiry is enforced by the storage backend that issues the token (Supabase
-    validates `exp` server-side); the local provider is dev/CI-only and does not
-    enforce expiry (documented risk, docs/security.md §7). `expires_at` is
-    computed from the provider's own notion where available; a signing failure
-    raises SignedUrlError (502) without leaking the storage path.
+    docs/api.md §5 (5 min), docs/multi-tenancy.md §4: objects are never public.
+    Owner-only — a foreign or missing id raises DocumentNotFoundError (404,
+    docs/security.md §2 anti-enumeration), so a caller can never learn another
+    tenant's object key. Expiry is enforced by the issuing backend (Supabase
+    validates `exp` server-side); the local provider is dev/CI-only and does
+    not enforce expiry (documented risk, docs/security.md §7). A signing
+    failure raises SignedUrlError (502) without leaking the storage path.
     """
     result = await db.execute(
         _GET_DOCUMENT,

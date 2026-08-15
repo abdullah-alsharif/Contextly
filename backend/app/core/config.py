@@ -99,8 +99,7 @@ class Settings(BaseSettings):
     @field_validator("rate_limit_chat_per_minute", "rate_limit_general_per_minute")
     @classmethod
     def _validate_rate_limits(cls, value: int) -> int:
-        # A non-positive budget would 429 every request (`len(hits) >= per_minute`
-        # is then always true) and silently brick the API — fail at startup.
+        # A non-positive budget would 429 every request — fail at startup.
         if value <= 0:
             raise ValueError(f"rate limit per minute must be > 0, got {value!r}")
         return value
@@ -109,9 +108,8 @@ class Settings(BaseSettings):
     @classmethod
     def _validate_signed_url_ttl(cls, value: int) -> int:
         # Short-lived by design (docs/security.md §3 "signed URLs 5 min"). The
-        # cap keeps `expires_at` truthful against the storage backend's token
-        # expiry (Supabase clamps at 604800s) so a misconfiguration can neither
-        # mint non-expiring URLs nor report a longer lifetime than the token.
+        # cap keeps `expires_at` truthful against the backend's token expiry
+        # (Supabase clamps at 604800s).
         if value <= 0 or value > 3600:
             raise ValueError(
                 "storage_signed_url_ttl_seconds must be in 1..3600 "

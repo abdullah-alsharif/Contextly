@@ -113,13 +113,6 @@ export function useChat(conversationId: string | undefined) {
         content,
         idempotencyKeyRef.current,
         {
-          onMeta: () => {
-            setMessages((rows) =>
-              rows.map((row) =>
-                row.localId === assistantLocalId ? { ...row, pending: true } : row,
-              ),
-            );
-          },
           onDelta: (text) => {
             setMessages((rows) =>
               rows.map((row) =>

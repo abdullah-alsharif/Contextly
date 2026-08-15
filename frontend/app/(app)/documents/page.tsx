@@ -9,6 +9,7 @@ import EmptyState from "@/components/empty-state";
 import PageTitleBar from "@/components/page-title-bar";
 import StatCard from "@/components/stat-card";
 import UploadDropzone from "@/components/upload-dropzone";
+import { formatBytes } from "@/lib/format";
 import { useDocuments } from "@/lib/hooks/use-documents";
 
 export default function DocumentsPage() {
@@ -39,7 +40,11 @@ export default function DocumentsPage() {
           label="Indexed"
           value={stats.totalChunks > 0 ? stats.totalChunks.toLocaleString() : "0"}
           icon="database"
-          hint={stats.totalBytes > 0 ? `${(stats.totalBytes / (1024 * 1024)).toFixed(1)} MB stored` : "0 MB stored"}
+          hint={
+            stats.totalBytes > 0
+              ? `${formatBytes(stats.totalBytes, 1)} stored`
+              : "0 MB stored"
+          }
         />
       </section>
 

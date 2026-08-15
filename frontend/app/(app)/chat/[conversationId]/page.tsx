@@ -31,11 +31,7 @@ export default function ConversationPage() {
   } = useConversationDetail(conversationId);
   const { messages, loading: messagesLoading, streaming, error, send, retry, lastQuestion } =
     useChat(conversationId);
-  const { documents: allDocuments } = useDocuments();
-  const allReadyDocuments = useMemo(
-    () => allDocuments.filter((doc) => doc.status === "ready"),
-    [allDocuments],
-  );
+  const { readyDocuments: allReadyDocuments } = useDocuments();
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);

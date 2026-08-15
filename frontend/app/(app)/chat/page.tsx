@@ -3,7 +3,7 @@
 // Chat entry (docs/frontend-design.md §4): three-pane shell with first-message
 // empty state (context panel + empty chat column). Starting a conversation
 // carries any pre-selected ready documents (US3 AC5).
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ContextPanel from "@/components/context-panel";
 import EmptyState from "@/components/empty-state";
@@ -12,15 +12,10 @@ import { useDocuments } from "@/lib/hooks/use-documents";
 
 export default function ChatPage() {
   const router = useRouter();
-  const { documents } = useDocuments();
+  const { readyDocuments } = useDocuments();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const readyDocuments = useMemo(
-    () => documents.filter((doc) => doc.status === "ready"),
-    [documents],
-  );
 
   const startConversation = async () => {
     if (creating) return;

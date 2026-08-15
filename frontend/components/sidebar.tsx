@@ -1,9 +1,8 @@
 "use client";
 
-// ChatGPT-style sidebar: logo header (search + collapse toggle), Documents,
-// New Conversation, Pinned/Recents/Archived sections, account at the bottom.
-// Desktop collapses to a 64px icon rail (hovering the rail reveals the
-// expand toggle in place of the logo); mobile gets an overlay drawer.
+// ChatGPT-style sidebar (docs/frontend-design.md §2): logo header with search
+// + collapse, Documents, New Conversation, Pinned/Recents/Archived, account.
+// Desktop collapses to a 64px icon rail; mobile gets an overlay drawer.
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";

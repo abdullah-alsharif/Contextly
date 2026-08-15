@@ -274,8 +274,7 @@ async def search_conversations(
     stable ranking (docs/api.md §3): exact title, then partial title, then
     message content, newest `updated_at` first within each tier, id as final
     tiebreaker. Archived included; each result carries a `preview` snippet of
-    the newest matching message (null for title matches). `limit`/`offset`
-    page the ranked set — the frontend fetches 5 at a time and appends."""
+    the newest matching message (null for title matches)."""
     result = await db.execute(
         _SEARCH_CONVERSATIONS,
         {

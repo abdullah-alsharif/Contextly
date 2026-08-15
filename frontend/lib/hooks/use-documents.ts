@@ -138,9 +138,11 @@ export function useDocuments() {
   );
 
   const stats = deriveStats(documents);
+  const readyDocuments = documents.filter((doc) => doc.status === "ready");
 
   return {
     documents,
+    readyDocuments,
     stats,
     loading,
     error,

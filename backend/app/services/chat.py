@@ -2,29 +2,22 @@
 
 Contract: specs/008-chat-conversations/contracts/chat.md §2-3, following
 docs/chat.md §4-6, docs/api.md §4 (SSE protocol, idempotency), docs/rag.md
-§4-5/§7 (context construction, sources, empty/failure handling), and
-docs/security.md §4 (prompt-injection mitigation).
+§4-5/§7, and docs/security.md §4 (prompt-injection mitigation).
 
-Pipeline (docs/chat.md §4), split in two phases so HTTP errors (404/400/409/502)
-surface before the SSE stream starts:
+Pipeline (docs/chat.md §4), split in two phases so HTTP errors surface before
+the SSE stream starts:
 
 1. `prepare_chat` — on its OWN session: validate ownership, check the document
-   selection, persist the user message (idempotency-deduped by
-   (conversation, key)), embed the question, retrieve top-K hits, then COMMIT
-   (contracts/chat.md §3: "the user message row is committed pre-stream", so a
-   client disconnect mid-stream never loses the exchange).
+   selection, persist the user message (idempotency-deduped), embed the
+   question, retrieve top-K hits, then COMMIT — a client disconnect mid-stream
+   never loses the exchange (contracts/chat.md §3).
 2. `stream_chat_events` — on its OWN session: build the untrusted-excerpt
-   prompt, generate (streaming when the provider supports it), persist the
-   assistant message exactly once with sources + metrics, auto-rename the
-   default title, then COMMIT.
+   prompt, generate (streaming when supported), persist the assistant message
+   exactly once with sources + metrics, auto-rename the default title, COMMIT.
 
-Each phase opens a fresh session and re-applies the RLS role + claim
-(docs/multi-tenancy.md §2) — the database stays the enforced boundary.
-
-A mid-stream provider failure persists the partial answer with status='error'
-so the UI can offer a retry (docs/chat.md §6, docs/rag.md §7). An unexpected
-non-provider failure terminates the stream with an explicit error event and
-persists nothing.
+Each phase re-applies the RLS role + claim (docs/multi-tenancy.md §2). A
+mid-stream provider failure persists the partial answer with status='error'
+so the UI can offer a retry (docs/chat.md §6, docs/rag.md §7).
 """
 
 from __future__ import annotations
@@ -153,8 +146,7 @@ class PreparedChat:
     """Everything needed to stream one answer (user message committed).
 
     `replay` is set on an idempotent retry whose previous answer completed:
-    the client gets the stored text back in one delta + done with the stored
-    sources (contracts/chat.md §3).
+    the client gets the stored text back (contracts/chat.md §3).
     """
 
     conversation_id: uuid.UUID
@@ -165,9 +157,7 @@ class PreparedChat:
     retrieval_ms: float
     idempotency_key: str | None = None
     hits: list[RetrievalHit] = field(default_factory=list)
-    replay: tuple[uuid.UUID, str, list[dict[str, Any]]] | None = (
-        None  # (id, content, sources)
-    )
+    replay: tuple[uuid.UUID, str, list[dict[str, Any]]] | None = None
 
 
 class NoDocumentsSelectedError(Exception):
@@ -189,13 +179,7 @@ async def _check_selection(db: AsyncSession, conversation_id: uuid.UUID) -> None
 def _build_prompt_messages(
     question: str, hits: list[RetrievalHit]
 ) -> list[dict[str, str]]:
-    """System rules + delimited untrusted excerpts, then the question.
-
-    Excerpts are numbered [1]…[n] in similarity order and prefixed with
-    `filename · page N` so the model can cite them (docs/rag.md §4-5). The
-    prompt marks the excerpts as untrusted and forbids following any
-    instructions inside them (docs/security.md §4).
-    """
+    """System rules + numbered untrusted excerpts, then the question (docs/rag.md §4-5)."""
     blocks = []
     for index, hit in enumerate(hits, start=1):
         location = hit.filename
@@ -227,15 +211,11 @@ async def prepare_chat(
 ) -> PreparedChat:
     """Validate + persist the user message + retrieve hits (raises HTTP-able errors).
 
-    Runs on its own RLS-scoped session and COMMITS the user message before the
-    stream starts (contracts/chat.md §3) — a client disconnect mid-stream never
-    loses the exchange, and an idempotent retry always finds the original user
-    message. Order matters for idempotency (docs/api.md §4): persist (or
-    resolve) the user message BEFORE retrieval.
-
+    Commits the user message on its own session before the stream starts
+    (contracts/chat.md §3) — a disconnect mid-stream never loses the exchange.
     A duplicate key whose original exchange is still streaming raises
-    IdempotencyInFlightError (409); a dead duplicate (previous attempt failed
-    before any output) reruns the pipeline on the same user message.
+    IdempotencyInFlightError (409); a dead duplicate reruns the pipeline on
+    the same user message.
     """
     async with session_factory() as db:
         await apply_identity_to_session(db, identity)
@@ -328,12 +308,11 @@ async def _persist_user_message(
 async def _find_completed_replay(
     db: AsyncSession, conversation_id: uuid.UUID, user_message_id: uuid.UUID
 ) -> tuple[uuid.UUID, str, list[dict[str, Any]]] | None:
-    """The completed assistant answer following a user message, if any.
+    """The NEWEST completed (status='done') assistant answer after the user message, if any.
 
-    Returns the NEWEST assistant row after the user message: an old
-    `status='error'` partial from a failed attempt must never shadow a later
-    `done` answer, or replays would re-run the pipeline and stack duplicates
-    (spec US4/AC1, FR-014).
+    An old `status='error'` partial from a failed attempt must never shadow a
+    later `done` answer, or replays would re-run the pipeline and stack
+    duplicates (spec US4/AC1, FR-014).
     """
     result = await db.execute(
         _FIND_ASSISTANT_AFTER,
@@ -358,12 +337,11 @@ async def stream_chat_events(
 ) -> Any:
     """Yield SSE events for one answer; persist the assistant message once.
 
-    Runs on its own RLS-scoped session and COMMITS at stream end with the
-    assistant message + sources + metrics (docs/chat.md §4). A mid-stream
-    provider failure persists the partial text with status='error' and yields
-    a terminal error event (docs/chat.md §6, docs/rag.md §7); an unexpected
-    non-provider failure yields a terminal error event and persists nothing.
-    The idempotency key is released from the in-flight registry when the
+    Commits at stream end with the assistant message + sources + metrics
+    (docs/chat.md §4). A mid-stream provider failure persists the partial text
+    with status='error' and yields a terminal error event (docs/chat.md §6,
+    docs/rag.md §7); an unexpected non-provider failure yields a terminal
+    error event and persists nothing. The idempotency key is released when the
     stream ends.
     """
     yield ChatEvent("meta", {"message_id": str(prepared.user_message_id)})
@@ -430,11 +408,8 @@ async def stream_chat_events(
 
             partial: list[str] = []
 
-            # FakeProvider streams a fixed canned answer with no [n] markers,
-            # but quickstart S3 + the Phase 8 smoke test (T034) require visible
-            # citations. Inject one [1] marker delta for dev/CI providers when
-            # sources exist (UI renders it as the source-viewer chip; harmless
-            # for real providers, which may already cite inline).
+            # FakeProvider's canned answer has no [n] markers, but dev/CI need
+            # visible citations; inject one [1] delta when sources exist.
             def _annotate_answer(text: str) -> str:
                 if not sources:
                     return text
@@ -522,10 +497,9 @@ async def stream_chat_events(
                 },
             )
     except Exception as exc:
-        # Unexpected (non-provider) failure — e.g. a DB error while persisting.
-        # Terminate the stream with an explicit error event instead of dropping
-        # the connection silently: nothing was persisted, so a retry re-runs the
-        # pipeline (docs/chat.md §6).
+        # Unexpected (non-provider) failure: terminate with an explicit error
+        # event — nothing was persisted, so a retry re-runs the pipeline
+        # (docs/chat.md §6).
         logger.exception(
             "chat stream failed unexpectedly for conversation %s: %s",
             prepared.conversation_id,

@@ -1,43 +1,24 @@
 """Phase 10 RAG evaluation harness (docs/roadmap.md Phase 10, docs/testing.md §6).
 
-Headless, reproducible, deterministic retrieval + answer-quality harness for the
-engine built in Phases 4-7. Runs offline (no UI, no Postgres, no worker): it
-reads the seed PDFs in `eval/documents/`, parses them with the product's
-`parse_pdf`, chunks them with the *locked* Phase-5 defaults
-(`chunk_size_tokens=500`, `chunk_overlap_tokens=50`, docs/rag.md §2,
-docs/ingestion.md §4.3), embeds the corpus, then ranks each query from
-`eval/datasets/qa.json` over the top-K chunks (default 6).
+Headless, reproducible, deterministic retrieval + answer-quality harness:
+parses the seed PDFs in `eval/documents/`, chunks them with the locked Phase-5
+defaults (`chunk_size_tokens=500`, `chunk_overlap_tokens=50`), embeds the
+corpus, and ranks each query from `eval/datasets/qa.json` over the top-K
+chunks (default 6). No UI, Postgres, or worker needed.
 
-Embedding mode (`--embedding`, default `auto`):
-- `auto` — `AI_PROVIDER=fake` (hermetic CI default) uses the deterministic
-  lexical `LexicalEmbedder` in `eval/embedding.py` because FakeProvider's
-  vectors are deliberately content-blind (docs/ai-providers.md §2, plan D2).
-  Any real provider (nvidia/openrouter + keys) uses its true `bge-m3`
-  embeddings. This is the documented opt-in for local real-mode runs.
-- `lexical` / `real` force one or the other.
+Embedding mode (`--embedding`, default `auto`): `AI_PROVIDER=fake` (hermetic
+CI default) uses the deterministic `LexicalEmbedder` in `eval/embedding.py`;
+real providers (nvidia/openrouter + keys) use their true `bge-m3` embeddings.
+`lexical` / `real` force one or the other.
 
-Metrics (docs/testing.md §6):
-- `recall@6` (document): expected doc appears among the top-K chunks.
-- `MRR`: 1/rank of that doc's best chunk.
-- page-coverage variants: the expected *page* falls inside a retrieved chunk's
-  `[page_start, page_end]` span (the chunker merges short pages, so page
-  citations are chunk starts — docs/ingestion.md §4.3).
-- Answer quality on full-pipeline runs: prompt from the top-K excerpts →
-  `provider.generate`, then a rule-based judge checks `answer_contains`
-  (correctness) against the answer and against the retrieved excerpts
-  (grounding/faithfulness). Fake provider exercises the plumbing; real
-  providers give the true score.
+Metrics (docs/testing.md §6): `recall@6` (document), `MRR`, page-coverage
+variants, and rule-based answer quality (contains + grounding) on full-pipeline
+runs. The gate (both recall@6 variants >= `--threshold`, default 0.85) sets the
+exit code so CI fails on retrieval regressions; a markdown report goes to
+`--out` (default `eval/reports/rag-eval.md`). Deterministic given the same
+inputs — tie-breaks are pinned, no wall-clock timestamps in the report.
 
-The gate (both recall@6 variants >= `--threshold`, default 0.85) sets the exit
-code so CI fails on retrieval regressions. A markdown report is written to
-`--out` (default `eval/reports/rag-eval.md`) with per-query recall/MRR and the
-top-K diagnostics for any query where the expected document was not retrieved.
-Deterministic given the same inputs: tie-breaks and sorting are pinned, and the
-report carries no wall-clock timestamps.
-
-Reproduce (clean checkout, fake provider default):
-    make eval
-    # or: PYTHONPATH=backend python3 -m eval.run_eval --out eval/reports/rag-eval.md
+Reproduce (clean checkout, fake provider default): `make eval`.
 """
 
 from __future__ import annotations
@@ -131,18 +112,15 @@ class EvalSummary:
     @property
     def gate_pass(self) -> bool:
         # Both recall@6 variants clear the threshold (docs/testing.md §6): on
-        # this 15-chunk corpus doc-level recall@6 sits near the content-blind
-        # random baseline (~0.8-0.9), while page coverage drops to ~0.4 for
-        # broken embedding/retrieval — the page variant carries the
-        # discriminating signal for the CI gate (spec Edge Cases).
+        # this 15-chunk corpus page coverage drops to ~0.4 for broken
+        # embedding/retrieval, so the page variant carries the discriminating
+        # signal for the CI gate (spec Edge Cases).
         return self.recall_at_6 >= self.threshold and self.page_recall_at_6 >= self.threshold
 
 
 def _dist(left: list[float], right: list[float]) -> float:
     # Squared L2 — same metric the product ranks with (pgvector `embedding
-    # <-> query`, retrieval.py). The lexical embedder emits unit vectors, so
-    # L2 ordering is equivalent to cosine there; for raw real-provider vectors
-    # L2 exactly mirrors the product's ranking.
+    # <-> query`, retrieval.py).
     return sum((a - b) * (a - b) for a, b in zip(left, right))
 
 
@@ -167,8 +145,7 @@ def load_corpus() -> list[ChunkRecord]:
     size_chars = round(settings.chunk_size_tokens * CHARS_PER_TOKEN)
     overlap_chars = round(settings.chunk_overlap_tokens * CHARS_PER_TOKEN)
     if overlap_chars >= size_chars:
-        # Mirrors app.services.chunker's own guard; a harness must fail with a
-        # clean message, not a traceback, when the chunking config is invalid.
+        # Mirror chunker's own guard; fail cleanly, not with a traceback.
         raise SystemExit(
             "invalid chunking config: CHUNK_SIZE_TOKENS="
             f"{settings.chunk_size_tokens} with CHUNK_OVERLAP_TOKENS="

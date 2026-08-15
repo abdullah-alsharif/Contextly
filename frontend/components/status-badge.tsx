@@ -11,7 +11,7 @@ const TONES: Record<DocumentStatus, string> = {
   superseded: "bg-tertiary-fixed text-on-tertiary-fixed-variant",
 };
 
-const LABELS: Record<DocumentStatus, string> = {
+export const STATUS_LABELS: Record<DocumentStatus, string> = {
   ready: "Ready",
   processing: "Processing",
   uploaded: "Queued",
@@ -51,7 +51,7 @@ export default function StatusBadge({
           history_toggle_off
         </span>
       )}
-      {LABELS[status]}
+      {STATUS_LABELS[status]}
     </span>
   );
 }

@@ -42,7 +42,7 @@ if str(BACKEND_DIR) not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from eval.run_eval import DEFAULT_REPORT_PATH
+from eval.run_eval import DEFAULT_REPORT_PATH  # noqa: E402
 
 DEFAULT_SWEEP_PATH = REPO_ROOT / "eval" / "reports" / "tuning-sweep.md"
 DEFAULT_CHUNK_SIZE = 500

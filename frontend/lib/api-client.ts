@@ -305,7 +305,6 @@ export function listMessages(conversationId: string): Promise<Message[]> {
 }
 
 export interface StreamEvents {
-  onMeta?: (messageId: string) => void;
   onDelta: (text: string) => void;
   onDone: (payload: { id: string; sources: Source[]; llm_ms?: number | null }) => void;
   onError: (message: string) => void;
@@ -373,9 +372,6 @@ export async function streamAnswer(
     if (!payload || typeof payload !== "object") return;
     const obj = payload as Record<string, unknown>;
     switch (currentEvent) {
-      case "meta":
-        if (typeof obj.message_id === "string") events.onMeta?.(obj.message_id);
-        break;
       case "delta":
         if (typeof obj.text === "string") events.onDelta(obj.text);
         break;

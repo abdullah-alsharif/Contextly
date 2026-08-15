@@ -1,11 +1,10 @@
-// Documents table (docs/frontend-design.md §3): border-less rows, hover
-// #F8FAFC, pagination footer. Toolbar (search + status filter, §4) narrows
-// rows client-side. Failed rows show Re-process; delete is hover-revealed
-// with an inline confirm.
+// Documents table (docs/frontend-design.md §3): search + status filter
+// toolbar, paginated rows. Failed rows show Re-process; delete is
+// hover-revealed with an inline confirm.
 "use client";
 
 import { useMemo, useState } from "react";
-import StatusBadge from "@/components/status-badge";
+import StatusBadge, { STATUS_LABELS } from "@/components/status-badge";
 import type { Document, DocumentStatus } from "@/lib/api-client";
 import { formatBytes, formatDate } from "@/lib/format";
 
@@ -13,11 +12,9 @@ const PAGE_SIZE = 8;
 
 const STATUS_FILTERS: { value: DocumentStatus | "all"; label: string }[] = [
   { value: "all", label: "All Statuses" },
-  { value: "ready", label: "Ready" },
-  { value: "processing", label: "Processing" },
-  { value: "uploaded", label: "Queued" },
-  { value: "failed", label: "Failed" },
-  { value: "superseded", label: "Outdated" },
+  ...(Object.keys(STATUS_LABELS) as DocumentStatus[])
+    .filter((status) => status !== "deleted")
+    .map((status) => ({ value: status, label: STATUS_LABELS[status] })),
 ];
 
 export default function DocumentTable({

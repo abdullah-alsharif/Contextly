@@ -1,15 +1,13 @@
 // Stat card (docs/frontend-design.md §3): flat card, watermark icon @10%,
-// uppercase label, display-lg number, accent trend line.
+// uppercase label, display-lg number.
 interface StatCardProps {
   label: string;
   value: string;
   icon: string;
   hint?: string;
-  trend?: string;
-  trendPositive?: boolean;
 }
 
-export default function StatCard({ label, value, icon, hint, trend, trendPositive }: StatCardProps) {
+export default function StatCard({ label, value, icon, hint }: StatCardProps) {
   return (
     <div className="relative overflow-hidden rounded-xl border border-outline-variant bg-surface p-stack-lg">
       <span
@@ -24,21 +22,8 @@ export default function StatCard({ label, value, icon, hint, trend, trendPositiv
       <p className="mt-1 font-display text-display-lg font-bold text-primary">
         {value}
       </p>
-      {(trend || hint) && (
-        <div className="mt-stack-sm flex items-center gap-1">
-          {trend && (
-            <span
-              className={`font-display text-label-sm ${
-                trendPositive ? "text-secondary-container" : "text-error"
-              }`}
-            >
-              {trend}
-            </span>
-          )}
-          {hint && (
-            <span className="font-display text-label-sm text-on-surface-variant">{hint}</span>
-          )}
-        </div>
+      {hint && (
+        <p className="mt-stack-sm font-display text-label-sm text-on-surface-variant">{hint}</p>
       )}
     </div>
   );

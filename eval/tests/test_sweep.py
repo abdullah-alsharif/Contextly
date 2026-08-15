@@ -14,10 +14,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import pytest
+import pytest  # noqa: E402
 
-from eval.run_eval import DEFAULT_REPORT_PATH
-from eval.sweep import (
+from eval.run_eval import DEFAULT_REPORT_PATH  # noqa: E402
+from eval.sweep import (  # noqa: E402
     DEFAULT_CHUNK_SIZE,
     DEFAULT_OVERLAP,
     DEFAULT_TOP_K,
