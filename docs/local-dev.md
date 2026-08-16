@@ -31,7 +31,7 @@ contextly/
 │   │   └── schemas/               # pydantic request/response models
 │   ├── tests/                     # unit + integration + security matrix
 │   ├── worker.py                  # DB-backed worker entrypoint (python -m app.worker)
-│   ├── pyproject.toml / requirements.txt
+│   ├── pyproject.toml / requirements.txt / requirements.lock
 │   └── Dockerfile
 ├── eval/                          # RAG evaluation dataset + harness
 │   ├── datasets/                  # qa pairs, expected sources

@@ -22,7 +22,7 @@ test: ## Backend pytest (in container)
 eval: ## Phase 10 RAG eval (headless, hermetic, fake provider) + eval unit tests
 	# Offline harness: no DB/UI needed (docs/testing.md §6). Requires backend
 	# deps locally (e.g. `backend/.venv/bin/python` or `pip install -r
-	# backend/requirements.txt`).
+	# backend/requirements.lock`).
 	APP_ENV=dev AI_PROVIDER=fake PYTHONPATH=backend $(PYTHON) -m eval.run_eval --out eval/reports/rag-eval.md && \
 	APP_ENV=dev AI_PROVIDER=fake PYTHONPATH=backend $(PYTHON) -m pytest eval/tests -q
 
@@ -35,8 +35,8 @@ eval-sweep: ## Phase 12 RAG parameter sweep (docs/rag.md §2 grid, hermetic) + s
 lint: ## Backend: ruff + mypy · Frontend: tsc + eslint (mirrors CI scope)
 	docker compose exec backend ruff check app tests
 	docker compose exec backend mypy app
-	docker compose exec frontend npx tsc --noEmit
-	docker compose exec frontend npx eslint .
+	docker compose exec frontend npm run typecheck
+	docker compose exec frontend npm run lint
 
 smoke: ## Playwright smoke on the full stack (needs db+backend+worker up)
 	# Runs on the host (playwright.config.ts spawns `npm run dev` on :3000).
@@ -54,7 +54,7 @@ check: ## Local CI gate (mirrors .github/workflows/ci.yml) + every script
 	# security matrix, like CI's postgres service); eval and frontend steps run
 	# on the host. Brings up db/backend/worker itself and leaves them running.
 	# Covers: ruff/mypy/migrate/pytest/matrix, eval, eval-sweep, tsc, eslint,
-	# security:check, next build, and the Playwright smoke (via `smoke`).
+	# audit, security:check, next build, and the Playwright smoke (via `smoke`).
 	docker compose up -d db backend worker
 	docker compose exec backend ruff check app tests
 	docker compose exec backend mypy app
@@ -65,8 +65,9 @@ check: ## Local CI gate (mirrors .github/workflows/ci.yml) + every script
 	APP_ENV=dev AI_PROVIDER=fake PYTHONPATH=backend $(PYTHON) -m eval.run_eval --out eval/reports/rag-eval.md
 	APP_ENV=dev AI_PROVIDER=fake PYTHONPATH=backend $(PYTHON) -m pytest eval/tests -q
 	$(MAKE) eval-sweep
-	cd frontend && npx tsc --noEmit
-	cd frontend && npx eslint .
+	cd frontend && npm run typecheck
+	cd frontend && npm run lint
+	cd frontend && npm audit --audit-level=high
 	cd frontend && npm run security:check
-	cd frontend && npx next build
+	cd frontend && npm run build
 	$(MAKE) smoke
