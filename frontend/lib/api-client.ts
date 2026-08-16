@@ -436,6 +436,6 @@ export async function signOutLocally(): Promise<void> {
     // network dropped; cookies clear below regardless
   }
   if (typeof window !== "undefined" && token) {
-    window.location.assign("/login");
+    window.location.assign(new URL("/login", window.location.origin).href);
   }
 }

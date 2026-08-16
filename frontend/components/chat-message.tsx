@@ -53,13 +53,16 @@ function splitChildren(
   return React.Children.map(children, (child) => {
     if (typeof child === "string") return splitText(child, sources, onCite);
     if (React.isValidElement(child)) {
-      return React.cloneElement(child, {
-        children: splitChildren(
-          (child.props as { children?: React.ReactNode }).children,
-          sources,
-          onCite,
-        ),
-      });
+      return React.cloneElement(
+        child as React.ReactElement<{ children?: React.ReactNode }>,
+        {
+          children: splitChildren(
+            (child.props as { children?: React.ReactNode }).children,
+            sources,
+            onCite,
+          ),
+        },
+      );
     }
     return child;
   });

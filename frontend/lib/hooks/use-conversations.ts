@@ -29,7 +29,9 @@ export function useConversationDetail(conversationId: string | undefined) {
   }, [conversationId]);
 
   useEffect(() => {
-    void load();
+    // Deferred so the initial fetch's setState isn't synchronous with render.
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   const setDocuments = useCallback(

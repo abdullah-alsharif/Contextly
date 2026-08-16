@@ -62,7 +62,9 @@ export function useDocuments() {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    // Deferred so the initial fetch's setState isn't synchronous with render.
+    const timer = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(timer);
   }, [refresh]);
 
   // Poll while anything is still uploading/processing.

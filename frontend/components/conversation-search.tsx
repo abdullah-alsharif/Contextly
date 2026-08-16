@@ -170,25 +170,23 @@ export default function ConversationSearch({
     inputRef.current?.focus();
   }, []);
 
-  // Debounced search; stale responses dropped by request id.
+  // Debounced search; resets run inside the timer (nothing set sync in effect).
   useEffect(() => {
     const trimmed = query.trim();
-    if (!trimmed) {
+    const id = ++requestIdRef.current;
+    const timer = window.setTimeout(() => {
+      if (requestIdRef.current !== id) return;
       setResults([]);
       setOffset(0);
       setHasMore(false);
-      setStatus("idle");
-      setAnnouncement("");
-      return;
-    }
-    setResults([]);
-    setOffset(0);
-    setHasMore(false);
-    setFetchingMore(false);
-    setMoreError(false);
-    setStatus("searching");
-    const id = ++requestIdRef.current;
-    const timer = window.setTimeout(() => {
+      setFetchingMore(false);
+      setMoreError(false);
+      if (!trimmed) {
+        setStatus("idle");
+        setAnnouncement("");
+        return;
+      }
+      setStatus("searching");
       searchConversations(trimmed, 0, PAGE_SIZE)
         .then((rows) => {
           if (requestIdRef.current !== id) return;

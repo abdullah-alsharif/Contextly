@@ -49,7 +49,7 @@ flowchart LR
 | `RATE_LIMIT_CHAT_PER_MINUTE`, `RATE_LIMIT_GENERAL_PER_MINUTE` | Render | ops knobs (defaults 30 / 120) |
 | `NEXT_PUBLIC_BACKEND_URL` | Vercel | server-side + client base URL (CSP `connect-src`) |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel | frontend Supabase client (anon key is public by design) |
-| `NEXT_PUBLIC_AUTH_MODE=supabase` | Vercel | switches the middleware from dev cookie to Supabase sessions |
+| `NEXT_PUBLIC_AUTH_MODE=supabase` | Vercel | switches the proxy from dev cookie to Supabase sessions |
 | `CHUNK_SIZE_TOKENS` | Render | NVIDIA hosted embeddings cap inputs at 512 tokens — use `400` (docs/ai-providers.md §2) |
 
 Never commit real values; keep `.env.example` in the repo, secrets in the hosting

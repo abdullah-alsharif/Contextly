@@ -3,9 +3,9 @@
 // local compose stack with zero external credentials (docs/local-dev.md §1,
 // docs/roadmap.md Phase 8).
 import { expect, test } from "@playwright/test";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const FIXTURE = join(__dirname, "fixtures", "sample.pdf");
+const FIXTURE = fileURLToPath(new URL("./fixtures/sample.pdf", import.meta.url));
 const QUESTION = "What is the refund period?";
 const CHUNK_TEXT = "The refund period is 30 days from purchase.";
 
@@ -19,7 +19,7 @@ test("smoke: login → upload → ready → chat → cite", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "Documents Space" })).toBeVisible();
 
   // -- US2 validation: non-PDF rejected with a friendly inline error (S2) ----
-  const txtProbe = join(__dirname, "fixtures", "not-a-pdf.txt");
+  const txtProbe = fileURLToPath(new URL("./fixtures/not-a-pdf.txt", import.meta.url));
   await page.setInputFiles('input[type="file"]', txtProbe);
   await expect(page.getByText(/PDF files only/)).toBeVisible();
   await expect(page.getByText("sample.pdf uploaded")).not.toBeVisible();

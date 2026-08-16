@@ -11,7 +11,7 @@ export async function POST() {
     return response;
   }
 
-  const supabase = createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   await supabase.auth.signOut();
   return response;
 }

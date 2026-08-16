@@ -110,7 +110,7 @@ Queries where the expected document was not retrieved first, with the top-K docu
   - `3.` data-security-policy.pdf p6-10 - sim -0.8451 - `'Remote access. Remote access requires the company VPN plus M'`
   - `4.` hr-handbook.pdf p9-12 - sim -0.9331 - `'Expense reimbursement. Submit expense reports within 30 days'`
   - `5.` hr-handbook.pdf p1-4 - sim -0.9341 - `'Acme Supply Co. - Employee Handbook. Effective January 1, 20'`
-  - `6.` shipping-policy.pdf p5-8 - sim -0.9376 - `'International shipping. We ship internationally to select co'`
+  - `6.` shipping-policy.pdf p5-8 - sim -0.9379 - `'International shipping. We ship internationally to select co'`
 
 
 _No hard-negative trap was triggered: the expected document always outranked the similar-topic doc._

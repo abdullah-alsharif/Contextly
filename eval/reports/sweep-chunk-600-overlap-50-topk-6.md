@@ -97,7 +97,7 @@ Queries where the expected document was not retrieved first, with the top-K docu
   - `3.` data-security-policy.pdf p9-10 - sim -0.9005 - `'Third parties. Vendors must sign a data processing agreement'`
   - `4.` refund-policy.pdf p12-14 - sim -0.9232 - `'How to request a refund. Open the Acme Support portal and ch'`
   - `5.` benefits-policy.pdf p1-6 - sim -0.9409 - `'Acme Supply Co. Benefits Program. Effective January 1, 2026.'`
-  - `6.` hr-handbook.pdf p1-6 - sim -0.9668 - `'Acme Supply Co. - Employee Handbook. Effective January 1, 20'`
+  - `6.` hr-handbook.pdf p1-6 - sim -0.9671 - `'Acme Supply Co. - Employee Handbook. Effective January 1, 20'`
 
 
 _No hard-negative trap was triggered: the expected document always outranked the similar-topic doc._

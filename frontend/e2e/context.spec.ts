@@ -4,9 +4,9 @@
 // Select/Deselect all, and empty states covered against the local compose
 // stack (dev-mode register + upload → ready, like smoke).
 import { expect, test } from "@playwright/test";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const FIXTURE = join(__dirname, "fixtures", "sample.pdf");
+const FIXTURE = fileURLToPath(new URL("./fixtures/sample.pdf", import.meta.url));
 const usingRow = (page: import("@playwright/test").Page) =>
   page.locator("div").filter({ hasText: /^Using:/ });
 

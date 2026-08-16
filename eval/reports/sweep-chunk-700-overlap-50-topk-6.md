@@ -94,7 +94,7 @@ Queries where the expected document was not retrieved first, with the top-K docu
 
   - `1.` refund-policy.pdf p14 - sim -0.4702 - `'Policy changes. Acme Supply Co. may update this refund polic'`
   - `2.` shipping-policy.pdf p8-14 - sim -0.5975 - `'Address changes. You may change the delivery address within '`
-  - `3.` shipping-policy.pdf p1-7 - sim -0.6664 - `'Acme Supply Co. - Shipping & Delivery Policy. Effective Janu'`
+  - `3.` shipping-policy.pdf p1-7 - sim -0.6682 - `'Acme Supply Co. - Shipping & Delivery Policy. Effective Janu'`
   - `4.` refund-policy.pdf p7-13 - sim -0.7959 - `'Processing time. Once we receive and inspect your return, th'`
   - `5.` data-security-policy.pdf p10 - sim -0.8798 - `'Policy changes. Acme may update this policy at any time. Con'`
   - `6.` refund-policy.pdf p1-6 - sim -0.9182 - `'Acme Supply Co. - Refund & Return Policy. Effective January '`
@@ -105,7 +105,7 @@ Queries where the expected document was not retrieved first, with the top-K docu
 - doc_rank=1, page_rank=1, mrr=0.500
 - Retrieved:
 
-  - `1.` hr-handbook.pdf p1-8 - sim -0.7267 - `'Acme Supply Co. - Employee Handbook. Effective January 1, 20'`
+  - `1.` hr-handbook.pdf p1-8 - sim -0.7012 - `'Acme Supply Co. - Employee Handbook. Effective January 1, 20'`
   - `2.` benefits-policy.pdf p9-13 - sim -0.7438 - `'Wellness stipend. Acme offers a $600 annual wellness stipend'`
   - `3.` benefits-policy.pdf p1-8 - sim -0.8214 - `'Acme Supply Co. Benefits Program. Effective January 1, 2026.'`
   - `4.` hr-handbook.pdf p9-15 - sim -0.8545 - `'Expense reimbursement. Submit expense reports within 30 days'`

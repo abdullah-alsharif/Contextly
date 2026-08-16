@@ -86,7 +86,7 @@ services:
       - ./frontend/app:/app/app
       - ./frontend/components:/app/components
       - ./frontend/lib:/app/lib
-      - ./frontend/middleware.ts:/app/middleware.ts
+      - ./frontend/proxy.ts:/app/proxy.ts
       - ./frontend/tailwind.config.ts:/app/tailwind.config.ts
     ports: ["3000:3000"]
     depends_on:

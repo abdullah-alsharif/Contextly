@@ -213,7 +213,14 @@ function AccountMenu({
   const [confirming, setConfirming] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setOpen(false), [pathname]);
+  // Close the profile menu when navigating away (derived during render).
+  const [prevPathname, setPrevPathname] = useState(pathname);
+  if (pathname !== prevPathname) {
+    setPrevPathname(pathname);
+    setOpen(false);
+    setConfirming(false);
+  }
+
   useEffect(() => {
     if (open) menuRef.current?.focus({ preventScroll: true });
   }, [open]);
@@ -503,7 +510,9 @@ export default function Sidebar() {
   );
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
   const searchOpenRef = useRef(false);
-  searchOpenRef.current = searchOpen;
+  useEffect(() => {
+    searchOpenRef.current = searchOpen;
+  }, [searchOpen]);
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((current) => {
@@ -519,13 +528,17 @@ export default function Sidebar() {
 
   // Apply the persisted preference (or medium-screen rule) after hydration.
   useEffect(() => {
-    let stored: string | null = null;
-    try {
-      stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-    } catch {
-      // fall back to the viewport rule
-    }
-    setCollapsed(stored !== null ? stored === "1" : window.innerWidth < 1024);
+    // Deferred out of the synchronous effect path; runs right after paint.
+    const frame = window.requestAnimationFrame(() => {
+      let stored: string | null = null;
+      try {
+        stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      } catch {
+        // fall back to the viewport rule
+      }
+      setCollapsed(stored !== null ? stored === "1" : window.innerWidth < 1024);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -575,7 +588,6 @@ export default function Sidebar() {
       window.removeEventListener("conversations:updated", onConversationsUpdated);
       window.clearInterval(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh]);
 
   const patch = useCallback(
@@ -674,13 +686,14 @@ export default function Sidebar() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Drawer closes on navigation, Escape, or overlay click; Escape inside the
-  // search popup stays with it.
+  // Drawer closes on navigation (derived during render), Escape, or overlay
+  // click; Escape inside the search popup stays with it.
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
-  useEffect(() => {
-    if (drawerOpen) closeDrawer();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  const [prevNavPathname, setPrevNavPathname] = useState(pathname);
+  if (pathname !== prevNavPathname) {
+    setPrevNavPathname(pathname);
+    setDrawerOpen(false);
+  }
   useEffect(() => {
     if (drawerOpen) drawerCloseRef.current?.focus({ preventScroll: true });
   }, [drawerOpen]);

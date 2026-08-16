@@ -1,5 +1,5 @@
 # Base: deps + source (shared by dev and prod builds)
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json* ./
@@ -10,10 +10,10 @@ COPY . .
 FROM base AS builder
 RUN npm run build
 
-FROM node:20-alpine AS prod
+FROM node:22-alpine AS prod
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
-COPY --from=builder /app/next.config.js ./next.config.js
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next

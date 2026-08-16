@@ -46,12 +46,18 @@ export default function SourceViewer({
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
 
+  // Reset on source change, derived during render.
+  const [prevDocId, setPrevDocId] = useState(source.document_id);
+  if (source.document_id !== prevDocId) {
+    setPrevDocId(source.document_id);
+    setObjectUrl(null);
+    setOpenError(null);
+  }
+
   // Prefetch the bytes so the click opens synchronously — an await in the
   // handler would lose the user gesture and the popup would be blocked.
   useEffect(() => {
     let cancelled = false;
-    setObjectUrl(null);
-    setOpenError(null);
     void downloadDocument(source.document_id)
       .then((blob) => {
         if (!cancelled) setObjectUrl(URL.createObjectURL(blob));

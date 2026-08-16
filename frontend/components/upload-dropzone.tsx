@@ -64,6 +64,7 @@ export default function UploadDropzone({ upload, documents }: UploadDropzoneProp
   // Batch queue: files after the paused duplicate, resumed once it is
   // resolved — every file in a multi-file drop gets handled in turn.
   const resumeQueueRef = useRef<File[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
   const dialogOpenRef = useRef(false);
   const documentNames = useMemo(
     () => (documents ?? []).map((doc) => doc.filename),
@@ -134,6 +135,7 @@ export default function UploadDropzone({ upload, documents }: UploadDropzoneProp
               // Pause the batch for the user's choice; the queue resumes after.
               dialogOpenRef.current = true;
               resumeQueueRef.current = valid.slice(i + 1);
+              setPendingCount(valid.length - i - 1);
               setDuplicate({ file, existingId: err.existingId });
               setRenameValue(suggestRename(file.name, documentNames));
               return;
@@ -171,6 +173,7 @@ export default function UploadDropzone({ upload, documents }: UploadDropzoneProp
     async (uploads: Promise<unknown>[] = []) => {
       const rest = resumeQueueRef.current;
       resumeQueueRef.current = [];
+      setPendingCount(0);
       dialogOpenRef.current = false;
       for (const pending of uploads) await pending;
       if (rest.length > 0) await handleFiles(rest);
@@ -213,21 +216,24 @@ export default function UploadDropzone({ upload, documents }: UploadDropzoneProp
     [handleFiles],
   );
 
-  // Guard lives at the user entry points, not inside handleFiles: the
-  // resolution paths call it while the dialog is still open (resumeBatch
-  // clears the ref only after its arguments are evaluated).
-  const dropAllowed = !uploading && !dialogOpenRef.current;
-
+  // Guard lives at the user entry points — resolution paths call handleFiles
+  // while the dialog is open; refs are read at event time so values are fresh.
   return (
     <div
       role="button"
       tabIndex={0}
       aria-label="Upload PDF documents"
       onKeyDown={(event) => {
-        if ((event.key === "Enter" || event.key === " ") && dropAllowed)
+        if (
+          (event.key === "Enter" || event.key === " ") &&
+          !uploading &&
+          !dialogOpenRef.current
+        )
           inputRef.current?.click();
       }}
-      onClick={() => dropAllowed && inputRef.current?.click()}
+      onClick={() => {
+        if (!uploading && !dialogOpenRef.current) inputRef.current?.click();
+      }}
       onDragOver={(event) => {
         event.preventDefault();
         setDragging(true);
@@ -295,11 +301,11 @@ export default function UploadDropzone({ upload, documents }: UploadDropzoneProp
               {formatDate(existingVersion.created_at)}
             </p>
           )}
-          {resumeQueueRef.current.length > 0 && (
+          {pendingCount > 0 && (
             <p className="mt-1 flex items-center gap-1.5 text-label-sm text-on-surface-variant">
               <span className="material-symbols-outlined text-sm">queue</span>
-              {resumeQueueRef.current.length} more file
-              {resumeQueueRef.current.length === 1 ? "" : "s"} in this batch will continue after your
+              {pendingCount} more file
+              {pendingCount === 1 ? "" : "s"} in this batch will continue after your
               choice.
             </p>
           )}
@@ -372,7 +378,8 @@ export default function UploadDropzone({ upload, documents }: UploadDropzoneProp
         className="hidden"
         onChange={(event) => {
           const files = Array.from(event.target.files ?? []);
-          if (files.length > 0 && dropAllowed) void handleFiles(files);
+          if (files.length > 0 && !uploading && !dialogOpenRef.current)
+            void handleFiles(files);
         }}
       />
     </div>

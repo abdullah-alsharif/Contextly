@@ -41,13 +41,15 @@ lint: ## Backend: ruff + mypy · Frontend: tsc + eslint (mirrors CI scope)
 smoke: ## Playwright smoke on the full stack (needs db+backend+worker up)
 	# Runs on the host (playwright.config.ts spawns `npm run dev` on :3000).
 	# The compose frontend container also binds :3000, so it is parked for the
-	# run and restored afterwards; a stopped frontend stays stopped. First run
-	# needs browsers: `cd frontend && npm run smoke:install`.
+	# run and restored afterwards; a stopped frontend stays stopped. The suite
+	# is hermetic (docs/testing.md §6): backend + worker are recreated with
+	# AI_PROVIDER=fake for the run, then restored. First run needs browsers:
+	# `cd frontend && npm run smoke:install`.
 	@frontend_up=$$(docker compose ps -q frontend); \
 	if [ -n "$$frontend_up" ]; then docker compose stop frontend; fi; \
-	cd frontend && npm run smoke; status=$$?; \
-	if [ -n "$$frontend_up" ]; then docker compose start frontend; fi; \
-	exit $$status
+	AI_PROVIDER=fake docker compose up -d --force-recreate backend worker; \
+	trap 'docker compose up -d --force-recreate backend worker; if [ -n "$$frontend_up" ]; then docker compose start frontend; fi' EXIT; \
+	cd frontend && npm run smoke
 
 check: ## Local CI gate (mirrors .github/workflows/ci.yml) + every script
 	# Backend steps run in the compose backend container (DB-gated pytest +

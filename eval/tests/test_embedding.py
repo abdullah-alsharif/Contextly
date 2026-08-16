@@ -53,11 +53,10 @@ def test_fit_is_idempotent_by_text_order() -> None:
 def test_corpus_vectors_bit_stable_golden() -> None:
     """Pinned golden hash: corpus vectors must be bit-identical everywhere.
 
-    The embedder uses only IEEE-754 basic arithmetic (frexp + odd-power series
-    for the IDF log, correctly-rounded sqrt), so any libm/platform change would
-    shift a bit and fail here — the guarantee that reports re-run byte-identical
-    on any machine (docs/testing.md §6.1, embedding.py::_log). The golden
-    covers the real committed corpus through the product's parse + chunk.
+    The embedder uses only IEEE-754 basic arithmetic, so any libm/platform
+    change would shift a bit and fail here — reports re-run byte-identical on
+    any machine (docs/testing.md §6.1). Regenerate the golden whenever the
+    committed corpus or its PDF-parsed text changes (e.g. after a pypdf bump).
     """
     from eval.run_eval import load_corpus
 
@@ -66,5 +65,5 @@ def test_corpus_vectors_bit_stable_golden() -> None:
     vectors = emb.embed([c.content for c in corpus])
     blob = b"".join(struct.pack(">d", v) for vec in vectors for v in vec)
     assert hashlib.sha256(blob).hexdigest() == (
-        "9a96d95196969c5ab102cb5bd64bf7c8c6b6f64d9c6d9ce6150b4e623c2b3ce9"
+        "8dde46d3b5ac91cb18e83aa9ee56c153c7ad0a455a8838367cb15343fbeb65f6"
     )

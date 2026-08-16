@@ -1,8 +1,5 @@
-// Session guard (research D1/D2). Runs before every request:
-//  - supabase mode: refresh session via getUser() and write cookies back
-//  - dev mode: treat the ctx_dev_token cookie as the session
-// Redirects signed-out users from app routes to /login, and signed-in users
-// from /login|/register to /documents.
+// Session guard (D1/D2): refresh the Supabase session or trust the dev cookie,
+// redirecting users on the wrong side of the auth boundary.
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { DEV_TOKEN_COOKIE, isDevAuthMode } from "./lib/auth/session";
@@ -14,7 +11,7 @@ function isAppRoute(pathname: string): boolean {
   return APP_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isDevAuthMode()) {

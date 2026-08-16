@@ -8,10 +8,10 @@
 // end during the manual/converge pass (next start + curl).
 
 import assert from "node:assert/strict";
-import nextConfig from "../next.config.js";
+import nextConfig from "../next.config.mjs";
 
 // Next.js context: `headers` is an async function returning the route table.
-assert.equal(typeof nextConfig.headers, "function", "next.config.js must define headers()");
+assert.equal(typeof nextConfig.headers, "function", "next.config.mjs must define headers()");
 const headers = await nextConfig.headers();
 assert.ok(Array.isArray(headers), "headers() must return an array");
 

@@ -52,6 +52,8 @@ export default function SidebarConversationRow({
 
   useEffect(() => {
     if (renaming) {
+      // A fresh rename session clears any pending cancel (ref guard below).
+      cancelledRef.current = false;
       inputRef.current?.focus();
       inputRef.current?.select();
     }
@@ -193,7 +195,6 @@ export default function SidebarConversationRow({
                       label: "Rename",
                       icon: "edit",
                       run: () => {
-                        cancelledRef.current = false;
                         setDraft(conversation.title);
                         setMenuOpen(false);
                         setRenaming(true);

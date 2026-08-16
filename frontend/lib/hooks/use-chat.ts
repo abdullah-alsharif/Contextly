@@ -36,19 +36,21 @@ export function useChat(conversationId: string | undefined) {
   const [lastQuestion, setLastQuestion] = useState<string | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
 
-  // Reset on conversation switch.
-  useEffect(() => {
+  // Reset on conversation switch (derived during render, per React guidance).
+  const [prevConversationId, setPrevConversationId] = useState(conversationId);
+  if (conversationId !== prevConversationId) {
+    setPrevConversationId(conversationId);
     setMessages([]);
-    setLoading(true);
     setStreaming(false);
     setError(null);
     setLastQuestion(null);
-    idempotencyKeyRef.current = null;
-    if (!conversationId) {
-      setLoading(false);
-      return;
-    }
+    setLoading(conversationId !== undefined);
+  }
+
+  useEffect(() => {
+    if (!conversationId) return;
     let cancelled = false;
+    idempotencyKeyRef.current = null;
     listMessages(conversationId)
       .then((rows) => {
         if (cancelled) return;

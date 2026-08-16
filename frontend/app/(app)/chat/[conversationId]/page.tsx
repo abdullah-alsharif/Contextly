@@ -38,16 +38,23 @@ export default function ConversationPage() {
   const [activeSource, setActiveSource] = useState<Source | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Initialize selection from the conversation's persisted document set, and
-  // persist selection changes (PATCH replace, contract C3).
-  useEffect(() => {
-    if (detail) {
-      const current = detail.documents
+  // Selection resets derive during render: conversation switch clears,
+  // detail load restores the persisted set (PATCH replace, contract C3).
+  const [prevConversationId, setPrevConversationId] = useState(conversationId);
+  const [prevDetailId, setPrevDetailId] = useState<string | null>(null);
+  if (conversationId !== prevConversationId) {
+    setPrevConversationId(conversationId);
+    setSelectedIds([]);
+    setPrevDetailId(null);
+  }
+  if (detail && detail.conversation.id !== prevDetailId) {
+    setPrevDetailId(detail.conversation.id);
+    setSelectedIds(
+      detail.documents
         .filter((doc) => doc.status === "ready")
-        .map((doc) => doc.id);
-      setSelectedIds(current);
-    }
-  }, [detail]);
+        .map((doc) => doc.id),
+    );
+  }
 
   const persistSelection = useCallback(
     (ids: string[]) => {
