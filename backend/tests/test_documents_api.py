@@ -872,17 +872,18 @@ def test_upload_replace_supersedes_old_and_purges_chunks(client: TestClient) -> 
     assert third["id"] != second["id"]
 
 
-def test_upload_replace_after_ready_purges_chunks(client: TestClient) -> None:
+def test_upload_replace_delete_after_ready_restores_old(client: TestClient) -> None:
     """Replacing a fully-processed document: chunks are KEPT while the
-    replacement processes, and purged only when it reaches 'ready' — a failed
-    replacement can still restore the old version intact (docs/ingestion.md
-    §7)."""
+    replacement processes and purged only when it reaches 'ready'. Deleting
+    the finalized replacement then undoes the replace: the old row is
+    re-queued and the worker rebuilds its chunks from the stored file
+    (docs/ingestion.md §7, migration 0008)."""
     token = _token(USER_A)
     status, doc = _upload(client, token, filename="payroll.pdf", content=make_pdf(["Old content"]))
     assert status == 201
     document_id = uuid.UUID(doc["id"])
 
-    async def process(document_id: uuid.UUID, ready: bool = True) -> None:
+    async def process(document_id: uuid.UUID) -> None:
         storage = client.app.state.storage_provider  # type: ignore[attr-defined]
         settings = Settings(
             database_url=os.environ["DATABASE_URL"],
@@ -900,7 +901,7 @@ def test_upload_replace_after_ready_purges_chunks(client: TestClient) -> None:
             outcome = await pipeline.process_claimed_document(
                 db, storage, settings, claimed, ai
             )
-            assert outcome == ("ready" if ready else "failed")
+            assert outcome == "ready"
             await db.commit()
 
     asyncio.run(process(document_id))
@@ -929,8 +930,8 @@ def test_upload_replace_after_ready_purges_chunks(client: TestClient) -> None:
             )
             assert cur.fetchone()[0] == 1
 
-    # replacement reaches ready -> old is finalized: superseded forever,
-    # chunks purged, superseded_from cleared
+    # replacement reaches ready -> old finalized: superseded, chunks purged,
+    # restore ticket kept
     asyncio.run(process(uuid.UUID(replacement["id"])))
 
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
@@ -939,14 +940,14 @@ def test_upload_replace_after_ready_purges_chunks(client: TestClient) -> None:
                 "select status, superseded_from, total_chunks from documents where id = %s",
                 (document_id,),
             )
-            assert cur.fetchone() == ("superseded", None, None)
+            assert cur.fetchone() == ("superseded", "ready", None)
             cur.execute(
                 "select count(*) from document_chunks where document_id = %s",
                 (document_id,),
             )
             assert cur.fetchone()[0] == 0
 
-    # deleting the finalized replacement does NOT restore the old version
+    # deleting the finalized replacement re-queues the old version (migration 0008)
     assert client.delete(
         f"/api/v1/documents/{replacement['id']}",
         headers={"Authorization": f"Bearer {token}"},
@@ -954,10 +955,25 @@ def test_upload_replace_after_ready_purges_chunks(client: TestClient) -> None:
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select status from documents where id = %s",
+                "select status, superseded_from, total_chunks from documents where id = %s",
                 (document_id,),
             )
-            assert cur.fetchone()[0] == "superseded"
+            assert cur.fetchone() == ("uploaded", None, None)
+
+    asyncio.run(process(document_id))
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, total_chunks from documents where id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone() == ("ready", 1)
+            cur.execute(
+                "select count(*) from document_chunks where document_id = %s",
+                (document_id,),
+            )
+            assert cur.fetchone()[0] == 1
 
 
 def test_upload_replace_failure_restores_old_status(client: TestClient) -> None:
@@ -1031,11 +1047,35 @@ def test_upload_replace_failure_restores_old_status(client: TestClient) -> None:
 
 def test_upload_replace_deleted_replacement_restores_old(client: TestClient) -> None:
     """Deleting a not-yet-resolved replacement undoes the replace: the old
-    document returns to its previous status (docs/ingestion.md §7)."""
+    document returns to its previous status with its chunks and chunk count
+    intact (docs/ingestion.md §7)."""
     token = _token(USER_A)
-    status, first = _upload(client, token, filename="payroll.pdf")
+    status, first = _upload(client, token, filename="payroll.pdf", content=make_pdf(["Keep me"]))
     assert status == 201
     first_id = uuid.UUID(first["id"])
+
+    async def process(document_id: uuid.UUID) -> None:
+        storage = client.app.state.storage_provider  # type: ignore[attr-defined]
+        settings = Settings(
+            database_url=os.environ["DATABASE_URL"],
+            auth_mode="dev",
+            app_env="dev",
+        )
+        from app.providers.ai import build_ai_provider
+
+        ai = build_ai_provider(settings)
+        async with _TestSessionFactory() as db:
+            claimed = await pipeline.claim_next(db, lease_seconds=300)
+            assert claimed is not None and claimed.id == document_id
+            await db.commit()
+        async with _TestSessionFactory() as db:
+            outcome = await pipeline.process_claimed_document(
+                db, storage, settings, claimed, ai
+            )
+            assert outcome == "ready"
+            await db.commit()
+
+    asyncio.run(process(first_id))
 
     status, replacement = _upload(client, token, filename="payroll.pdf", replace=True)
     assert status == 201
@@ -1048,10 +1088,101 @@ def test_upload_replace_deleted_replacement_restores_old(client: TestClient) -> 
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select status, superseded_from from documents where id = %s",
+                "select status, superseded_from, total_chunks from documents where id = %s",
                 (first_id,),
             )
-            assert cur.fetchone() == ("uploaded", None)
+            assert cur.fetchone() == ("ready", None, 1)
+            cur.execute(
+                "select count(*) from document_chunks where document_id = %s",
+                (first_id,),
+            )
+            assert cur.fetchone()[0] == 1
+
+
+def test_upload_replace_delete_chain_guard(client: TestClient) -> None:
+    """In a replace chain (A <- B <- C), deleting an intermediate superseded
+    version does NOT restore its predecessor while a newer active version
+    holds the name (migration 0008 guard). Deleting the head restores nothing:
+    the intermediate was itself deleted, so its storage object is gone."""
+    token = _token(USER_A)
+
+    async def process(document_id: uuid.UUID) -> None:
+        storage = client.app.state.storage_provider  # type: ignore[attr-defined]
+        settings = Settings(
+            database_url=os.environ["DATABASE_URL"],
+            auth_mode="dev",
+            app_env="dev",
+        )
+        from app.providers.ai import build_ai_provider
+
+        ai = build_ai_provider(settings)
+        async with _TestSessionFactory() as db:
+            claimed = await pipeline.claim_next(db, lease_seconds=300)
+            assert claimed is not None and claimed.id == document_id
+            await db.commit()
+        async with _TestSessionFactory() as db:
+            outcome = await pipeline.process_claimed_document(
+                db, storage, settings, claimed, ai
+            )
+            assert outcome == "ready"
+            await db.commit()
+
+    def _rows(*ids: uuid.UUID) -> list[tuple[str, bool, int | None]]:
+        with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+            with conn.cursor() as cur:
+                rows = []
+                for document_id in ids:
+                    cur.execute(
+                        "select status, deleted_at is not null, total_chunks "
+                        "from documents where id = %s",
+                        (document_id,),
+                    )
+                    rows.append(cur.fetchone())
+                return rows
+
+    status, version_a = _upload(
+        client, token, filename="payroll.pdf", content=make_pdf(["Chain A"])
+    )
+    assert status == 201
+    version_a_id = uuid.UUID(version_a["id"])
+    asyncio.run(process(version_a_id))
+
+    status, version_b = _upload(
+        client, token, filename="payroll.pdf", replace=True, content=make_pdf(["Chain B"])
+    )
+    assert status == 201
+    version_b_id = uuid.UUID(version_b["id"])
+    asyncio.run(process(version_b_id))
+
+    status, version_c = _upload(
+        client, token, filename="payroll.pdf", replace=True, content=make_pdf(["Chain C"])
+    )
+    assert status == 201
+    version_c_id = uuid.UUID(version_c["id"])
+    asyncio.run(process(version_c_id))
+
+    # deleting the intermediate (B) does not restore A: C is the live version
+    assert client.delete(
+        f"/api/v1/documents/{version_b_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    ).status_code == 204
+    assert _rows(version_a_id, version_b_id, version_c_id) == [
+        ("superseded", False, None),
+        ("superseded", True, None),
+        ("ready", False, 1),
+    ]
+
+    # deleting the head (C) restores nothing: B was itself deleted, so its
+    # storage object is gone and the row is not resurrected
+    assert client.delete(
+        f"/api/v1/documents/{version_c_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    ).status_code == 204
+    assert _rows(version_a_id, version_b_id, version_c_id) == [
+        ("superseded", False, None),
+        ("superseded", True, None),
+        ("ready", True, 1),
+    ]
 
 
 def test_upload_replace_with_storage_failure_keeps_old_active(client: TestClient) -> None:

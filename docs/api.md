@@ -84,9 +84,12 @@ same `409`.
 Replace is **reversible** (docs/ingestion.md §7): the old document's chunks
 stay in place and its previous status is remembered (`superseded_from`) while
 the replacement processes. If the replacement reaches `ready`, the old version
-is finalized as `superseded` (chunks purged); if it becomes `failed` or is
-deleted first, the old document is restored to its previous status and remains
-fully usable — the failed replacement row itself leaves the active set.
+is finalized as `superseded` (chunks purged, status still remembered); if it
+becomes `failed` or is deleted, the old document is restored — directly when
+its chunks are intact, re-queued for re-processing when the supersede had been
+finalized — and the failed replacement row itself leaves the active set. A
+superseded row that was itself deleted is not restored (its storage object is
+gone).
 
 ## 3. Conversations
 

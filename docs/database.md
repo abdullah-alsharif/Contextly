@@ -195,11 +195,15 @@ Notes:
   Replace is reversible (docs/ingestion.md §7): `superseded_from` remembers the
   pre-replace status and `replaces_document_id` links a replacement to the row
   it superseded (migration 0005, index `documents_replaces_idx`). The
-  `documents_replace_resolution` trigger (migration 0005) finalizes the
-  supersede (chunk purge) when a replacement reaches `ready`, and restores the
-  old status + chunks when it `fails` (the failed row then leaves the active
-  set) or is deleted — so the active-filename index always allows exactly one
-  active row per name.
+  `documents_replace_resolution` trigger (migration 0005, extended by 0008)
+  finalizes the supersede (chunk purge) when a replacement reaches `ready`,
+  and restores the old row when the replacement `fails` (the failed row then
+  leaves the active set) or is deleted: chunks intact → status restored as-is;
+  chunks purged (finalize had run) → re-queued as `uploaded` so the worker
+  rebuilds them from the stored file. A superseded row is only restored when
+  no newer active version holds the filename and the row was not itself
+  deleted (its storage object would be gone) — so the active-filename index
+  always allows exactly one active row per name.
 - No `updated_at` on chunks — immutable after write; chunk metadata edits are re-inserts.
 
 ### Local-dev auth shim & runtime role

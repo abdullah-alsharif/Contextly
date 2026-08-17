@@ -110,6 +110,8 @@ export function useDocuments() {
       setDeletingId(id);
       try {
         await deleteDocument(id);
+        // The delete may restore a superseded predecessor (migration 0008).
+        void refresh(true);
       } catch (err) {
         // 404-tolerant: row disappears either way (task T020)
         if (!(err instanceof Error) || !/404|no longer exists/.test(err.message)) {
@@ -120,7 +122,7 @@ export function useDocuments() {
         setDeletingId(null);
       }
     },
-    [],
+    [refresh],
   );
 
   const reprocess = useCallback(
