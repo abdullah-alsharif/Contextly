@@ -9,16 +9,17 @@ import io
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
-from app.services.pipeline import _clean_page_text, parse_pdf
+from app.services.pipeline import parse_pdf
+from app.services.text_clean import replace_control_chars
 
 
-def test_clean_page_text_drops_nul_and_other_c0_controls() -> None:
+def test_replace_control_chars_drops_nul_and_other_c0_controls() -> None:
     text = "a\x00b\x01c\x08d\x0b\x0c\x1fe\tg\nh\ri"
-    assert _clean_page_text(text) == "a b c d   e\tg\nh\ri"
+    assert replace_control_chars(text) == "a b c d   e\tg\nh\ri"
 
 
-def test_clean_page_text_keeps_normal_whitespace() -> None:
-    assert _clean_page_text("plain \t\n\r text") == "plain \t\n\r text"
+def test_replace_control_chars_keeps_normal_whitespace() -> None:
+    assert replace_control_chars("plain \t\n\r text") == "plain \t\n\r text"
 
 
 def test_parse_pdf_extracts_normal_text_unchanged() -> None:

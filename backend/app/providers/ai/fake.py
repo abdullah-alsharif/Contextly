@@ -63,6 +63,11 @@ class FakeProvider:
             message["content"] for message in messages if message.get("role") == "user"
         ]
         question = user_parts[-1].strip() if user_parts else ""
+        # Echo the question itself, not chat.py's <user_question> delimiters.
+        if question.startswith("<user_question>") and question.endswith(
+            "</user_question>"
+        ):
+            question = question[len("<user_question>") : -len("</user_question>")]
         return f'Answer for "{question}": {_CANNED_SUFFIX}'
 
     async def generate(

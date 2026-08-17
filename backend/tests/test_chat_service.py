@@ -217,7 +217,9 @@ def test_build_prompt_numbers_excerpts_with_locations():
     messages = _build_prompt_messages("When does the refund expire?", hits)
 
     assert [m["role"] for m in messages] == ["system", "user"]
-    assert messages[1]["content"] == "When does the refund expire?"
+    assert messages[1]["content"] == (
+        "<user_question>When does the refund expire?</user_question>"
+    )
 
     system = messages[0]["content"]
     assert system.startswith("You answer questions exclusively")

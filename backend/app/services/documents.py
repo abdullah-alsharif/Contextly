@@ -13,7 +13,6 @@ Delete order (research.md R4): owned-row lookup → soft-delete → remove objec
 
 from __future__ import annotations
 
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from logging import getLogger
@@ -27,10 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.security.identity import Identity
 from app.providers.storage.base import StorageError, StorageProvider, validate_key
+from app.services.text_clean import strip_control_chars
 
 logger = getLogger(__name__)
-
-_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 _INSERT_DOCUMENT = text(
     """
@@ -182,7 +180,7 @@ class DuplicateDocumentError(Exception):
 def sanitize_filename(filename: str) -> str:
     """Strip path components + control chars; display name only (docs/security.md §3)."""
     name = Path(filename.replace("\\", "/")).name
-    name = _CONTROL_CHARS.sub("", name).strip()
+    name = strip_control_chars(name).strip()
     return name
 
 

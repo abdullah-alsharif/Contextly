@@ -69,7 +69,7 @@ stateDiagram-v2
 
 ```mermaid
 flowchart LR
-  Q[User question] --> PRE[Preprocess: trim, cap length]
+  Q[User question] --> PRE[Preprocess: trim, cap length, sanitize]
   PRE --> EQ[AIProvider.embed question]
   EQ --> RET[pgvector HNSW top-K search]
   RET --> FILT[filter: conversation's ready documents only]
@@ -156,18 +156,18 @@ separate `MIGRATION_DATABASE_URL`; deploy blockers reject unsafe combinations
   recall ceiling, none beat the default's perfect document MRR while improving page
   coverage. Sweep data: [eval/reports/tuning-sweep.md](eval/reports/tuning-sweep.md).
 
-## What's next / known limits (honest section)
+## Known limits & deferred work (honest section)
 
-In scope for the MVP roadmap (phases 0–12), now shipped. Everything below is
-**explicitly deferred or accepted** (docs/mvp-scope.md, docs/security.md §7,
+The MVP roadmap (phases 0–12) is shipped. Everything below is **explicitly
+deferred or accepted** (docs/mvp-scope.md, docs/security.md §7,
 docs/tradeoffs.md):
 
 - **Free-tier pitfalls**: cold starts (Render sleep / Supabase pause), service limits,
   provider rate limits. Accepted for a $0 demo story.
-- **Accepted risks**: prompt injection is mitigated (delimiters + system instruction)
-  but inherent to RAG; rate limiting is per-process; `pypdf` is not a hardened parser
-  (PDF-only + size caps); no SSO/2FA; the Supabase service-role key must never reach
-  the browser bundle.
+- **Accepted risks**: prompt injection is mitigated (question sanitized + delimited,
+  system rule ignores embedded instructions) but inherent to RAG; rate limiting is
+  per-process; `pypdf` is not a hardened parser (PDF-only + size caps); no SSO/2FA;
+  the Supabase service-role key must never reach the browser bundle.
 - **Deferred features** (deliberately not in MVP): re-indexing of `ready`
   documents (failed docs can be re-processed — `PATCH /documents/{id}/reprocess`),
   hybrid search, reranking, query rewriting, Redis/Celery queues, async eval

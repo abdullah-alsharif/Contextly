@@ -32,6 +32,7 @@ from app.providers.ai.base import (
 )
 from app.providers.storage.base import StorageError, StorageProvider
 from app.services.chunker import CHARS_PER_TOKEN, Chunk, ParseError, chunk_pages
+from app.services.text_clean import replace_control_chars
 
 logger = getLogger(__name__)
 
@@ -146,12 +147,6 @@ async def claim_next(db: AsyncSession, *, lease_seconds: int) -> ClaimedDocument
     )
 
 
-def _clean_page_text(text: str) -> str:
-    """Replace C0 controls (NUL etc.) from broken PDF encodings — Postgres cannot
-    store NUL and the controls act as word separators (docs/ingestion.md §2)."""
-    return "".join(ch if ch >= " " or ch in "\t\n\r" else " " for ch in text)
-
-
 def parse_pdf(data: bytes) -> list[str]:
     """Extract per-page text (research.md R2). Runs in a thread by the caller."""
     try:
@@ -161,7 +156,9 @@ def parse_pdf(data: bytes) -> list[str]:
                 reader.decrypt("")
             except Exception as exc:  # noqa: BLE001 - map any decrypt failure
                 raise ParseError("corrupt or unreadable PDF") from exc
-        pages = [_clean_page_text(page.extract_text() or "") for page in reader.pages]
+        pages = [
+            replace_control_chars(page.extract_text() or "") for page in reader.pages
+        ]
     except (PdfReadError, PdfStreamError, ValueError, TypeError) as exc:
         raise ParseError("corrupt or unreadable PDF") from exc
     return pages
