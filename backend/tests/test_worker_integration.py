@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -33,7 +34,7 @@ from app.providers.ai.fake import FakeProvider
 from app.providers.storage.base import StorageError
 from app.providers.storage.local import LocalStorageProvider
 from app.services import pipeline
-from app.services.documents import delete_document
+from app.services.documents import cancel_document, delete_document
 from tests.pdf_fixtures import (
     make_corrupt_pdf,
     make_no_text_pdf,
@@ -679,6 +680,8 @@ def test_delete_purges_chunks_and_worker_writes_nothing_after(tmp_path: Path) ->
 
 
 def test_delete_during_processing_persists_no_chunks(tmp_path: Path) -> None:
+    """Deleting a row mid-flight aborts the run at the next stage poll — no
+    chunks ever appear for a deleted document (docs/ingestion.md §1)."""
     document_id = uuid.uuid4()
     storage_path = f"{USER_A}/docs/{document_id}.pdf"
     storage = LocalStorageProvider(root=tmp_path)
@@ -717,7 +720,7 @@ def test_delete_during_processing_persists_no_chunks(tmp_path: Path) -> None:
 
         outcome = asyncio.run(run_against_stale_claim())
 
-        assert outcome == "stale"
+        assert outcome == "cancelled"  # deleted → polled at the parse stage gate
         assert _chunk_rows(document_id) == []
     finally:
         _cleanup_document(document_id)
@@ -1007,5 +1010,137 @@ def test_reprocess_replaces_stale_chunks_without_unique_violation(
         second_chunks = _chunk_rows(document_id)
         assert len(second_chunks) == len(first_chunks)  # replaced, not duplicated
         assert _chunk_embeddings(document_id)  # vectors present
+    finally:
+        _cleanup_document(document_id)
+
+
+# ---------------------------------------------------------------------------
+# Phase 12: cancellation — the row's status is the worker's stop signal
+# ---------------------------------------------------------------------------
+
+
+class _CancelMidEmbedAI(FakeProvider):
+    """Fake provider that flips the document's status after `cancel_after` batches."""
+
+    def __init__(
+        self, cancel_after: int, flip: Callable[[], Awaitable[None]]
+    ) -> None:
+        super().__init__()
+        self.cancel_after = cancel_after
+        self.flip = flip
+        self.batches_seen = 0
+
+    async def embed(
+        self, texts: list[str], *, batch_size: int = 32, input_type: str = "passage"
+    ) -> list[list[float]]:
+        self.batches_seen += 1
+        if self.batches_seen >= self.cancel_after:
+            await self.flip()
+        return await super().embed(texts, batch_size=batch_size, input_type=input_type)
+
+
+def test_cancel_mid_embed_aborts_without_persisting(tmp_path: Path) -> None:
+    """A cancel during embedding stops the run at the next batch boundary: no
+    further embedding requests, no chunks persisted, row stays 'cancelled'
+    (docs/ingestion.md §1 — the status flip is the stop signal)."""
+    document_id = uuid.uuid4()
+    storage_path = f"{USER_A}/docs/{document_id}.pdf"
+    storage = LocalStorageProvider(root=tmp_path)
+    pages = ["Alpha " * 115 + f"page {i}" for i in range(40)]  # 40 chunks → 2 batches
+    data = make_pdf(pages)
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
+    _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
+
+    claimed: pipeline.ClaimedDocument | None = None
+
+    async def _flip() -> None:
+        async with _SessionFactory() as db:
+            assert claimed is not None
+            await pipeline._switch_to_owner(db, claimed)
+            await cancel_document(db, Identity(user_id=USER_A), document_id)
+            await db.commit()
+
+    ai = _CancelMidEmbedAI(cancel_after=1, flip=_flip)
+
+    try:
+
+        async def run() -> str:
+            nonlocal claimed
+            async with _SessionFactory() as db:
+                claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
+                assert claimed is not None and claimed.id == document_id
+                await db.commit()
+            async with _SessionFactory() as db:
+                outcome = await pipeline.process_claimed_document(
+                    db, storage, _SETTINGS, claimed, ai
+                )
+                await db.rollback()  # cancelled → nothing to commit
+                return outcome
+
+        outcome = asyncio.run(run())
+        assert outcome == "cancelled"
+        assert ai.batches_seen == 1  # second batch never embedded
+        row = _document_row(document_id)
+        assert row["status"] == "cancelled"
+        assert row["lease_until"] is None
+        assert _chunk_rows(document_id) == []
+        assert _chunk_embeddings(document_id) == []
+    finally:
+        _cleanup_document(document_id)
+
+
+def test_delete_mid_embed_aborts_like_cancel(tmp_path: Path) -> None:
+    """Deleting a document while it embeds stops the run at the next batch
+    boundary and no chunks are resurrected — regression for the reported bug
+    where the worker kept embedding a deleted file (docs/ingestion.md §1)."""
+    document_id = uuid.uuid4()
+    storage_path = f"{USER_A}/docs/{document_id}.pdf"
+    storage = LocalStorageProvider(root=tmp_path)
+    pages = ["Beta " * 115 + f"page {i}" for i in range(40)]
+    data = make_pdf(pages)
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
+    _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
+
+    claimed: pipeline.ClaimedDocument | None = None
+
+    async def _flip() -> None:
+        async with _SessionFactory() as db:
+            assert claimed is not None
+            await pipeline._switch_to_owner(db, claimed)
+            await delete_document(db, storage, Identity(user_id=USER_A), document_id)
+            await db.commit()
+
+    ai = _CancelMidEmbedAI(cancel_after=1, flip=_flip)
+
+    try:
+
+        async def run() -> str:
+            nonlocal claimed
+            async with _SessionFactory() as db:
+                claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
+                assert claimed is not None and claimed.id == document_id
+                await db.commit()
+            async with _SessionFactory() as db:
+                outcome = await pipeline.process_claimed_document(
+                    db, storage, _SETTINGS, claimed, ai
+                )
+                await db.rollback()  # nothing to persist for a deleted row
+                return outcome
+
+        outcome = asyncio.run(run())
+        assert outcome == "cancelled"
+        assert ai.batches_seen == 1  # second batch never embedded
+        with _admin() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select deleted_at from documents where id = %s", (document_id,)
+                )
+                assert cur.fetchone()[0] is not None
+        assert _chunk_rows(document_id) == []  # purge from delete + no resurrection
+        assert _chunk_embeddings(document_id) == []
     finally:
         _cleanup_document(document_id)

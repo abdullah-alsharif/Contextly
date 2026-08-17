@@ -25,6 +25,7 @@ from app.db.session import get_db
 from app.providers.storage.base import StorageProvider
 from app.schemas.document import DocumentOut, DownloadUrlOut
 from app.services.documents import (
+    CancelNotAllowedError,
     DocumentNotFoundError,
     DownloadError,
     DuplicateDocumentError,
@@ -33,6 +34,7 @@ from app.services.documents import (
     SignedUrlError,
     UploadFailedError,
     UploadTooLargeError,
+    cancel_document,
     create_document,
     delete_document,
     download_document,
@@ -119,7 +121,7 @@ async def upload_document(
 @router.get("", response_model=list[DocumentOut])
 async def get_documents(
     status: Literal[
-        "uploaded", "processing", "ready", "failed", "deleted", "superseded"
+        "uploaded", "processing", "ready", "failed", "deleted", "superseded", "cancelled"
     ]
     | None = None,
     identity: Identity = Depends(get_current_user),
@@ -216,6 +218,22 @@ async def remove_document(
         await delete_document(db, storage, identity, document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{document_id}/cancel", status_code=204)
+async def cancel_document_endpoint(
+    document_id: uuid.UUID,
+    identity: Identity = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Cancel a queued/processing document (docs/ingestion.md §1); the worker
+    aborts the in-flight run at its next stage poll."""
+    try:
+        await cancel_document(db, identity, document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CancelNotAllowedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.patch("/{document_id}/reprocess", response_model=DocumentOut)

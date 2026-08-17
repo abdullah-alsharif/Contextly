@@ -15,7 +15,8 @@ export type DocumentStatus =
   | "ready"
   | "failed"
   | "deleted"
-  | "superseded";
+  | "superseded"
+  | "cancelled";
 
 export interface Document {
   id: string;
@@ -231,6 +232,11 @@ export function deleteDocument(id: string): Promise<void> {
 
 export function reprocessDocument(id: string): Promise<Document> {
   return request<Document>(`/api/v1/documents/${id}/reprocess`, { method: "PATCH" });
+}
+
+/** Cancel a queued/processing document; the worker aborts in-flight (docs/ingestion.md §1). */
+export function cancelDocument(id: string): Promise<void> {
+  return request<void>(`/api/v1/documents/${id}/cancel`, { method: "POST" });
 }
 
 export async function downloadDocument(id: string): Promise<Blob> {

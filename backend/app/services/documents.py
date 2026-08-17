@@ -89,9 +89,22 @@ _REPROCESS = text(
         lease_until = null,
         updated_at = now()
     where id = :document_id and user_id = :user_id
-      and deleted_at is null and status = 'failed'
+      and deleted_at is null and status in ('failed', 'cancelled')
     returning id, filename, status, file_size_bytes, total_chunks, status_error,
               created_at, updated_at
+    """
+)
+
+_CANCEL = text(
+    """
+    update documents
+    set status = 'cancelled',
+        lease_until = null,
+        status_error = null,
+        updated_at = now()
+    where id = :document_id and user_id = :user_id
+      and deleted_at is null and status in ('uploaded', 'processing')
+    returning id
     """
 )
 
@@ -100,7 +113,7 @@ _FIND_ACTIVE_DUPLICATE = text(
     select id, filename
     from documents
     where user_id = :user_id and filename = :filename
-      and deleted_at is null and status <> 'superseded'
+      and deleted_at is null and status <> 'superseded' and status <> 'cancelled'
     order by created_at asc
     limit 1
     """
@@ -148,6 +161,10 @@ class DocumentNotFoundError(Exception):
 
 class ReprocessNotAllowedError(Exception):
     """Document exists but is not in a reprocessable state (→ 400)."""
+
+
+class CancelNotAllowedError(Exception):
+    """Document exists but is not cancellable (not queued/processing, → 409)."""
 
 
 class DuplicateDocumentError(Exception):
@@ -361,13 +378,14 @@ async def reprocess_document(
     identity: Identity,
     document_id: uuid.UUID,
 ) -> dict[str, Any]:
-    """Reset a failed document to 'uploaded' and purge its chunks so the worker
-    re-runs the full pipeline (docs/ingestion.md §7 re-indexing).
+    """Reset a failed or cancelled document to 'uploaded' and purge its chunks
+    so the worker re-runs the full pipeline (docs/ingestion.md §7 re-indexing).
 
     Owner-only scoped: a foreign/missing id raises DocumentNotFoundError (404).
-    Only `failed` documents are eligible — everything else raises
-    ReprocessNotAllowedError (400). Chunk purge runs in the same transaction
-    as the status reset, so a reprocessed document never shows stale chunks.
+    Only `failed` and `cancelled` documents are eligible — everything else
+    raises ReprocessNotAllowedError (400). Chunk purge runs in the same
+    transaction as the status reset, so a reprocessed document never shows
+    stale chunks.
     """
     result = await db.execute(
         _REPROCESS,
@@ -381,9 +399,40 @@ async def reprocess_document(
         )
         if existing.one_or_none() is None:
             raise DocumentNotFoundError("document not found")
-        raise ReprocessNotAllowedError("only failed documents can be reprocessed")
+        raise ReprocessNotAllowedError(
+            "only failed or cancelled documents can be reprocessed"
+        )
     await db.execute(_PURGE_CHUNKS, {"document_id": str(document_id)})
     return _serialize(row)
+
+
+async def cancel_document(
+    db: AsyncSession,
+    identity: Identity,
+    document_id: uuid.UUID,
+) -> None:
+    """Cancel a queued/processing document (docs/ingestion.md §1).
+
+    Owner-only scoped: a foreign/missing id raises DocumentNotFoundError (404);
+    anything not `uploaded`/`processing` raises CancelNotAllowedError (409).
+    The status flip is the worker's stop signal: the pipeline polls between
+    stages and aborts, so nothing persists for a cancelled document.
+    """
+    result = await db.execute(
+        _CANCEL,
+        {"document_id": str(document_id), "user_id": str(identity.user_id)},
+    )
+    row = result.one_or_none()
+    if row is None:
+        existing = await db.execute(
+            _GET_DOCUMENT,
+            {"document_id": str(document_id), "user_id": str(identity.user_id)},
+        )
+        if existing.one_or_none() is None:
+            raise DocumentNotFoundError("document not found")
+        raise CancelNotAllowedError(
+            "only queued or processing documents can be cancelled"
+        )
 
 
 async def get_document_download_url(

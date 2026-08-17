@@ -1,14 +1,11 @@
 """Document processing pipeline: claim → download → parse → chunk → embed → persist.
 
-One session per document (docs/ingestion.md §3, research.md R6). The claim is
-the single RLS-bypassing surface (worker_claim_next, SECURITY DEFINER); after
-claiming, this module switches the session transaction-locally to the runtime
-role + the document owner's claim, so every chunk INSERT (including vectors)
-and status UPDATE runs under the FORCE-RLS policies (docs/multi-tenancy.md
+One session per document (docs/ingestion.md §3, research.md R6); every write
+runs under the owner's RLS claim via _switch_to_owner (docs/multi-tenancy.md
 §2/§3, contracts/worker.md §1). Failure classes per contracts/ai-provider.md
-§6: ParseError and deterministic embed rejections (4xx except 429) →
-permanent failed now; transient storage or embed failures (429/5xx/network) →
-deferred-lease retry, then failed.
+§6. The row's status is the cancellation signal: the pipeline re-checks it
+between stages and aborts with 'cancelled' when the owner cancelled or deleted
+the document (docs/ingestion.md §1).
 """
 
 from __future__ import annotations
@@ -40,7 +37,7 @@ logger = getLogger(__name__)
 
 RLS_ROLE = "contextly_app"
 
-Outcome = Literal["ready", "retry", "failed", "stale"]
+Outcome = Literal["ready", "retry", "failed", "stale", "cancelled"]
 
 _CLAIM = text("SELECT * FROM worker_claim_next(:lease_seconds)")
 
@@ -104,6 +101,13 @@ _EXHAUST_RETRIES = text(
     """
 )
 
+_CHECK_ACTIVE = text(
+    """
+    select 1 from documents
+    where id = :id and status = 'processing' and deleted_at is null
+    """
+)
+
 
 @dataclass(frozen=True)
 class ClaimedDocument:
@@ -118,6 +122,13 @@ class ClaimedDocument:
 
 class StaleClaimError(Exception):
     """The claimed document is gone or was re-claimed; persist must roll back."""
+
+
+async def _check_active(db: AsyncSession, claimed: ClaimedDocument) -> bool:
+    """True while the row is still 'processing' — cancel/delete flips it away
+    (the stop signal, docs/ingestion.md §1). Caller switched to the owner."""
+    result = await db.execute(_CHECK_ACTIVE, {"id": str(claimed.id)})
+    return result.one_or_none() is not None
 
 
 async def claim_next(db: AsyncSession, *, lease_seconds: int) -> ClaimedDocument | None:
@@ -206,9 +217,7 @@ async def _persist(
     chunks: list[Chunk],
     embeddings: list[list[float]],
 ) -> None:
-    # A reprocess (retry, or a re-claimed document with stale rows) must never
-    # collide with leftover chunks: clear first, same transaction
-    # (docs/ingestion.md §3 — processing is idempotent per document).
+    # Clear first, same transaction: a re-run never collides with stale rows.
     await db.execute(_DELETE_CHUNKS, {"document_id": str(claimed.id)})
     for index, chunk in enumerate(chunks):
         await db.execute(
@@ -240,12 +249,11 @@ async def process_claimed_document(
     """Run one claimed document through the pipeline (contracts/worker.md §4–5).
 
     Failure classes (contracts/ai-provider.md §6): ParseError and deterministic
-    embed rejections (4xx except 429 — bad key, retired model, malformed
-    request) are permanent → failed now; StorageError, other AIProviderError
-    statuses (429/5xx), and any unexpected exception (poison PDFs, provider
-    bugs) are transient → deferred-lease retry that exhausts into failed after
-    worker_max_retries. Unexpected exceptions never escape: the worker loop
-    must survive arbitrary input (convergence finding F1).
+    embed rejections are permanent → failed now; storage/embed failures
+    (429/5xx) and unexpected exceptions are transient → deferred-lease retry,
+    then failed. Unexpected exceptions never escape (F1). The owner's
+    cancel/delete is polled between stages — the run then aborts as
+    'cancelled' and nothing persists.
     """
     await _switch_to_owner(db, claimed)
     started = perf_counter()
@@ -258,6 +266,10 @@ async def process_claimed_document(
                 "doc %s transient failure | class=transient | %s", claimed.id, message
             )
             return await _fail_transient(db, settings, claimed, message)
+
+        if not await _check_active(db, claimed):
+            logger.info("doc %s cancelled | stage=parse", claimed.id)
+            return "cancelled"
 
         try:
             pages = await asyncio.to_thread(parse_pdf, data)
@@ -285,31 +297,44 @@ async def process_claimed_document(
             )
             return await _fail_permanent(db, claimed, message)
 
-        try:
-            embeddings = await ai.embed(
-                [chunk.content for chunk in chunks],
-                batch_size=settings.embedding_batch_size,
-            )
-        except AIProviderError as exc:
-            if not is_transient_status(exc.status_code):
-                message = f"embedding configuration error: {exc}"
-                logger.warning(
-                    "doc %s permanent failure | class=permanent | %s",
+        batch_size = settings.embedding_batch_size
+        embeddings: list[list[float]] = []
+        for start in range(0, len(chunks), batch_size):
+            if not await _check_active(db, claimed):
+                logger.info(
+                    "doc %s cancelled | stage=embed | batches_done=%d/%d",
                     claimed.id,
-                    message,
+                    len(embeddings),
+                    len(chunks),
                 )
-                return await _fail_permanent(db, claimed, message)
-            message = f"embedding failed: {exc}"
-            logger.warning(
-                "doc %s transient failure | class=transient | %s", claimed.id, message
-            )
-            return await _fail_transient(db, settings, claimed, message)
-        except Exception as exc:
-            message = f"embedding failed: {exc}"
-            logger.warning(
-                "doc %s transient failure | class=transient | %s", claimed.id, message
-            )
-            return await _fail_transient(db, settings, claimed, message)
+                return "cancelled"
+            batch = [chunk.content for chunk in chunks[start : start + batch_size]]
+            try:
+                embeddings.extend(await ai.embed(batch, batch_size=len(batch)))
+            except AIProviderError as exc:
+                if not is_transient_status(exc.status_code):
+                    message = f"embedding configuration error: {exc}"
+                    logger.warning(
+                        "doc %s permanent failure | class=permanent | %s",
+                        claimed.id,
+                        message,
+                    )
+                    return await _fail_permanent(db, claimed, message)
+                message = f"embedding failed: {exc}"
+                logger.warning(
+                    "doc %s transient failure | class=transient | %s", claimed.id, message
+                )
+                return await _fail_transient(db, settings, claimed, message)
+            except Exception as exc:
+                message = f"embedding failed: {exc}"
+                logger.warning(
+                    "doc %s transient failure | class=transient | %s", claimed.id, message
+                )
+                return await _fail_transient(db, settings, claimed, message)
+
+        if not await _check_active(db, claimed):
+            logger.info("doc %s cancelled | stage=persist | chunks=%d", claimed.id, len(chunks))
+            return "cancelled"
 
         try:
             async with db.begin_nested():

@@ -1,6 +1,7 @@
 // Documents table (docs/frontend-design.md §3): search + status filter
-// toolbar, paginated rows. Failed rows show Re-process; delete is
-// hover-revealed with an inline confirm.
+// toolbar, paginated rows. Queued/processing rows show Cancel (worker aborts
+// in-flight); failed/cancelled rows show Re-process; delete is hover-revealed
+// with an inline confirm.
 "use client";
 
 import { useMemo, useState } from "react";
@@ -21,14 +22,18 @@ export default function DocumentTable({
   documents,
   onDelete,
   onReprocess,
+  onCancel,
   deletingId,
   reprocessingId,
+  cancellingId,
 }: {
   documents: Document[];
   onDelete: (id: string) => void;
   onReprocess: (id: string) => void;
+  onCancel: (id: string) => void;
   deletingId: string | null;
   reprocessingId: string | null;
+  cancellingId: string | null;
 }) {
   const [page, setPage] = useState(0);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -164,7 +169,31 @@ export default function DocumentTable({
                       </span>
                     ) : (
                       <span className="inline-flex items-center justify-end gap-1">
-                        {document.status === "failed" && (
+                        {(document.status === "uploaded" ||
+                          document.status === "processing") && (
+                          <button
+                            type="button"
+                            title="Cancel processing"
+                            aria-label={`Cancel processing ${document.filename}`}
+                            disabled={
+                              cancellingId !== null ||
+                              reprocessingId === document.id ||
+                              deletingId === document.id
+                            }
+                            onClick={() => onCancel(document.id)}
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-display text-label-sm font-medium text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <span
+                              className="material-symbols-outlined text-[10px]"
+                              aria-hidden="true"
+                            >
+                              {cancellingId === document.id ? "sync" : "cancel"}
+                            </span>
+                            {cancellingId === document.id ? "Stopping…" : "Cancel"}
+                          </button>
+                        )}
+                        {(document.status === "failed" ||
+                          document.status === "cancelled") && (
                           <button
                             type="button"
                             title="Re-process document"
@@ -188,11 +217,19 @@ export default function DocumentTable({
                           type="button"
                           title="Delete document"
                           aria-label={`Delete ${document.filename}`}
-                          disabled={reprocessingId === document.id}
+                          disabled={
+                            reprocessingId === document.id ||
+                            cancellingId === document.id
+                          }
                           onClick={() => setConfirmId(document.id)}
                           className="rounded-md p-1.5 text-on-surface-variant transition-colors hover:bg-error-container/50 hover:text-error disabled:opacity-0"
                         >
-                          <span className="material-symbols-outlined text-sm">delete</span>
+                          <span
+                            className="material-symbols-outlined fill text-sm"
+                            aria-hidden="true"
+                          >
+                            delete
+                          </span>
                         </button>
                       </span>
                     )}

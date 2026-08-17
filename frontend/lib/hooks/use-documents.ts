@@ -1,10 +1,11 @@
 // Documents workspace hook: list + 3 s polling while any row is
 // uploaded/processing (research D4), upload with progress, delete (404
-// tolerant), stats derivation (counts, size sum).
+// tolerant), cancel (worker aborts in-flight), stats derivation.
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  cancelDocument,
   deleteDocument,
   DuplicateDocumentError,
   listDocuments,
@@ -47,6 +48,7 @@ export function useDocuments() {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -139,6 +141,26 @@ export function useDocuments() {
     [],
   );
 
+  const cancel = useCallback(
+    async (id: string) => {
+      setCancellingId(id);
+      try {
+        await cancelDocument(id);
+        setDocuments((rows) =>
+          rows.map((row) =>
+            row.id === id ? { ...row, status: "cancelled" } : row,
+          ),
+        );
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Cancelling failed.");
+      } finally {
+        setCancellingId(null);
+      }
+    },
+    [],
+  );
+
   const stats = deriveStats(documents);
   const readyDocuments = documents.filter((doc) => doc.status === "ready");
 
@@ -151,7 +173,9 @@ export function useDocuments() {
     upload,
     remove,
     reprocess,
+    cancel,
     deletingId,
     reprocessingId,
+    cancellingId,
   };
 }

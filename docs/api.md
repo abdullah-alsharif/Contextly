@@ -34,7 +34,8 @@ the backend only validates JWTs. The backend exposes GET/PATCH `/auth/me` for th
 | GET | `/documents` | – | `200 [{document}]` (status filter optional `?status=`) | 401 |
 | GET | `/documents/{id}` | – | `200 {document, processing: {...}}` | 404 |
 | DELETE | `/documents/{id}` | – | `204` | 404 |
-| PATCH | `/documents/{id}/reprocess` | – | `200 {document}` (status reset to `uploaded`) | 400 (not failed), 404 |
+| POST | `/documents/{id}/cancel` | – | `204` | 409 (not queued/processing), 404 |
+| PATCH | `/documents/{id}/reprocess` | – | `200 {document}` (status reset to `uploaded`) | 400 (not failed/cancelled), 404 |
 
 Document object:
 ```json
@@ -56,19 +57,29 @@ size ≤ 10 MB (checked pre-upload and enforced again by the storage policy);
 filename sanitized (strip path + control chars). Storage path is server-generated
 (`{user_id}/docs/{document_id}.pdf`) — client filename is never used as a path.
 
-**Reprocessing:** `PATCH /documents/{id}/reprocess` re-queues a **failed**
-document: status → `uploaded`, `retry_count`/`status_error`/`total_chunks`
-cleared, chunks purged (same transaction) and the existing worker picks it up
-(docs/ingestion.md §7). Non-`failed` documents → `400`; the 404 rules are
-unchanged (docs/security.md §2).
+**Cancellation:** `POST /documents/{id}/cancel` stops a queued (`uploaded`) or
+in-flight (`processing`) document: status → `cancelled`, lease cleared. The
+worker polls the status between pipeline stages and aborts the run as soon as
+it is no longer `processing` — no further embedding requests are made and
+nothing persists (docs/ingestion.md §1). A `cancelled` row holds no chunks, is
+excluded from the duplicate check, and can be re-processed (see below).
+Non-cancellable states → `409`; the 404 rules are unchanged (docs/security.md
+§2).
+
+**Reprocessing:** `PATCH /documents/{id}/reprocess` re-queues a **failed or
+cancelled** document: status → `uploaded`, `retry_count`/`status_error`/
+`total_chunks` cleared, chunks purged (same transaction) and the existing
+worker picks it up (docs/ingestion.md §7). Other states → `400`; the 404
+rules are unchanged (docs/security.md §2).
 
 **Duplicate handling:** uploading a filename already held by an active
-(non-deleted, non-superseded) document → `409` with the existing row's id in
-the `X-Existing-Document-Id` header. `POST /documents?replace=true` instead
-supersedes that old document (status `superseded`, row kept in the docs table)
-and processes the new upload normally; a replace with no duplicate is a plain
-upload. The partial unique index (user_id, filename) closes parallel-upload
-races — the loser gets the same `409`.
+(non-deleted, non-superseded, non-cancelled) document → `409` with the
+existing row's id in the `X-Existing-Document-Id` header. `POST
+/documents?replace=true` instead supersedes that old document (status
+`superseded`, row kept in the docs table) and processes the new upload
+normally; a replace with no duplicate is a plain upload. The partial unique
+index (user_id, filename) closes parallel-upload races — the loser gets the
+same `409`.
 
 Replace is **reversible** (docs/ingestion.md §7): the old document's chunks
 stay in place and its previous status is remembered (`superseded_from`) while

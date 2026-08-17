@@ -13,7 +13,7 @@ import { formatBytes } from "@/lib/format";
 import { useDocuments } from "@/lib/hooks/use-documents";
 
 export default function DocumentsPage() {
-  const { documents, stats, loading, error, upload, remove, reprocess, deletingId, reprocessingId } =
+  const { documents, stats, loading, error, upload, remove, reprocess, cancel, deletingId, reprocessingId, cancellingId } =
     useDocuments();
 
   return (
@@ -71,8 +71,10 @@ export default function DocumentsPage() {
             documents={documents}
             onDelete={(id) => void remove(id)}
             onReprocess={(id) => void reprocess(id)}
+            onCancel={(id) => void cancel(id)}
             deletingId={deletingId}
             reprocessingId={reprocessingId}
+            cancellingId={cancellingId}
           />
         )}
       </section>

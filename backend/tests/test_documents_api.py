@@ -640,6 +640,168 @@ def test_reprocess_missing_auth_401(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Cancel: POST /documents/{id}/cancel (Phase 12, docs/ingestion.md §1)
+# ---------------------------------------------------------------------------
+def test_cancel_queued_204(client: TestClient) -> None:
+    """Cancelling an uploaded (queued) doc flips it to 'cancelled' immediately;
+    it is never claimed by the worker and holds no chunks."""
+    status, doc = _upload(client, _token(USER_A), content=make_pdf(["Queued content"]))
+    assert status == 201
+    document_id = uuid.UUID(doc["id"])
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/cancel",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
+    )
+    assert response.status_code == 204
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, lease_until from documents where id = %s",
+                (document_id,),
+            )
+            status, lease_until = cur.fetchone()
+            cur.execute(
+                "select count(*) from document_chunks where document_id = %s",
+                (document_id,),
+            )
+            chunk_count = cur.fetchone()[0]
+    assert status == "cancelled"
+    assert lease_until is None
+    assert chunk_count == 0
+
+
+def test_cancel_processing_204(client: TestClient) -> None:
+    """Cancelling a claimed (processing) doc clears the lease and flips the
+    status — the in-flight pipeline run aborts on its next poll."""
+    status, doc = _upload(client, _token(USER_A), content=make_pdf(["Claimed content"]))
+    assert status == 201
+    document_id = uuid.UUID(doc["id"])
+
+    async def claim() -> None:
+        async with _TestSessionFactory() as db:
+            claimed = await pipeline.claim_next(db, lease_seconds=300)
+            assert claimed is not None and claimed.id == document_id
+            await db.commit()
+
+    asyncio.run(claim())
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/cancel",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
+    )
+    assert response.status_code == 204
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, lease_until from documents where id = %s",
+                (document_id,),
+            )
+            status, lease_until = cur.fetchone()
+    assert status == "cancelled"
+    assert lease_until is None
+
+
+def test_cancel_ready_409(client: TestClient) -> None:
+    """A ready document is not cancellable — there is nothing to stop."""
+    status, doc = _upload(client, _token(USER_A), content=make_pdf(["Ready content"]))
+    assert status == 201
+    document_id = uuid.UUID(doc["id"])
+
+    async def process() -> None:
+        storage = client.app.state.storage_provider  # type: ignore[attr-defined]
+        settings = Settings(
+            database_url=os.environ["DATABASE_URL"],
+            auth_mode="dev",
+            app_env="dev",
+        )
+        from app.providers.ai import build_ai_provider
+
+        ai = build_ai_provider(settings)
+        async with _TestSessionFactory() as db:
+            claimed = await pipeline.claim_next(db, lease_seconds=300)
+            assert claimed is not None and claimed.id == document_id
+            await db.commit()
+        async with _TestSessionFactory() as db:
+            outcome = await pipeline.process_claimed_document(
+                db, storage, settings, claimed, ai
+            )
+            assert outcome == "ready"
+            await db.commit()
+
+    asyncio.run(process())
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/cancel",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
+    )
+    assert response.status_code == 409
+
+
+def test_cancel_cross_tenant_404(client: TestClient) -> None:
+    token_a, token_b = _token(USER_A), _token(USER_B)
+    _, doc_a = _upload(client, token_a)
+    response = client.post(
+        f"/api/v1/documents/{doc_a['id']}/cancel",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+    assert response.status_code == 404
+
+
+def test_cancel_nonexistent_404(client: TestClient) -> None:
+    response = client.post(
+        f"/api/v1/documents/{uuid.uuid4()}/cancel",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
+    )
+    assert response.status_code == 404
+
+
+def test_cancel_missing_auth_401(client: TestClient) -> None:
+    assert (
+        client.post(f"/api/v1/documents/{uuid.uuid4()}/cancel").status_code == 401
+    )
+
+
+def test_cancel_then_reprocess_round_trip_200(client: TestClient) -> None:
+    """A cancelled doc can be reprocessed — the worker picks it up again."""
+    status, doc = _upload(client, _token(USER_A), content=make_pdf(["Again?"]))
+    assert status == 201
+    document_id = uuid.UUID(doc["id"])
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/cancel",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
+    )
+    assert response.status_code == 204
+
+    response = client.patch(
+        f"/api/v1/documents/{document_id}/reprocess",
+        headers={"Authorization": f"Bearer {_token(USER_A)}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "uploaded"
+
+
+def test_cancel_then_reupload_same_filename_201(client: TestClient) -> None:
+    """A cancelled row no longer blocks the duplicate check — re-uploading the
+    same file creates a fresh row and reprocesses it (docs/api.md §2)."""
+    token = _token(USER_A)
+    status, doc = _upload(client, token, filename="payroll.pdf")
+    assert status == 201
+
+    response = client.post(
+        f"/api/v1/documents/{doc['id']}/cancel",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 204
+
+    status, _ = _upload(client, token, filename="payroll.pdf")
+    assert status == 201
+
+
+# ---------------------------------------------------------------------------
 # Duplicate policy: 409 on repeat upload, ?replace=true supersedes (Phase 12)
 # ---------------------------------------------------------------------------
 

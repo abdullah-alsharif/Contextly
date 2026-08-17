@@ -11,16 +11,31 @@ stateDiagram-v2
   failed --> processing : retry (max 3, backoff) — admin/manual only in practice
   failed --> uploaded : PATCH /documents/{id}/reprocess (manual, chunks purged)
   uploaded --> failed : worker crash without recovery
+  uploaded --> cancelled : POST /documents/{id}/cancel
+  processing --> cancelled : POST /documents/{id}/cancel
+  cancelled --> uploaded : PATCH /documents/{id}/reprocess (manual, chunks purged)
   ready --> superseded : POST /documents?replace=true (older version replaced)
   failed --> superseded : POST /documents?replace=true (older version replaced)
   ready --> deleted : DELETE /documents (soft delete + chunk purge)
   failed --> deleted : DELETE /documents
+  cancelled --> deleted : DELETE /documents
 ```
 
 States are stored in `documents.status`
-(`uploaded | processing | ready | failed | superseded | deleted`). `superseded`
-rows remain listed in the docs table ("Outdated") but are excluded from
-retrieval, conversation context, and worker claims (docs/database.md).
+(`uploaded | processing | ready | failed | superseded | deleted | cancelled`).
+`superseded` rows remain listed in the docs table ("Outdated") but are excluded
+from retrieval, conversation context, and worker claims (docs/database.md).
+
+**Cancellation (`POST /documents/{id}/cancel`):** queued (`uploaded`) and
+in-flight (`processing`) documents can be cancelled; the row flips to
+`cancelled` and its lease is cleared. The status is the worker's stop signal —
+the pipeline re-checks it between stages (after download, between every embed
+batch, before persist) and aborts as soon as it is no longer `processing` with
+`deleted_at` null, so a deleted or cancelled file never keeps burning
+embedding requests and no chunks persist for it. A `cancelled` row is terminal
+until the owner re-processes it or deletes it; it is excluded from the
+duplicate check, so re-uploading the same file just works (new row, fresh
+processing).
 
 ## 2. Synchronous vs asynchronous
 
@@ -78,6 +93,10 @@ flowchart LR
   W --> T[update status: ready]
   E -. failure .-> R[retry/backoff max 3]
   R --> FAIL[status: failed + status_error]
+  F -. cancelled .-> X[status no longer processing? abort]
+  P -. cancelled .-> X
+  C -. cancelled .-> X
+  E -. cancelled .-> X
 ```
 
 1. **Read** — fetch bytes from `StorageProvider` by `storage_path` (service credential).
@@ -98,6 +117,8 @@ flowchart LR
    retries with backoff. Over-cap inputs are truncated as a last-resort backstop; any
    text that still draws a deterministic 4xx (except 429) fails the document
    permanently (no pointless retries — [ai-providers.md](ai-providers.md) §4).
+   The pipeline drives the batches itself and re-checks the row's status between
+   batches, aborting the run if the owner cancelled or deleted the document.
 5. **Persist** — bulk insert `document_chunks` rows with `document_id`, `chunk_index`,
    `content`, `page_number`, `token_count`, `metadata`, `embedding`.
 6. **Finalize** — `documents.status = 'ready'`, `total_chunks = n`.
@@ -109,9 +130,10 @@ flowchart LR
 | Supported types | `application/pdf` only (MVP) |
 | Max file size | 10 MB (validated at API + enforced by storage policy) |
 | Max pages | None hard-coded; practical guard ~200 pages → soft warning (skip for MVP) |
-| Duplicate files | Per (user, filename) dedupe: an upload colliding with an active row → `409` (docs/api.md §2). The client offers **update** (`POST /documents?replace=true`) or upload under a **new name** (client pre-fills a suggested `name-2.pdf`). Update is reversible: the old row is marked `superseded` immediately (leaves the chat corpus, stays in the table) but keeps its chunks and remembers its previous status; if the replacement reaches `ready` the supersede is finalized (chunks purged), and if it `fails` or is deleted the old document is restored to its previous status (migration 0005 trigger, docs/database.md). The partial unique index `documents_active_filename_idx` enforces this against parallel-upload races |
-| Document deletion | `DELETE /documents/{id}` → soft-delete row + delete chunks + delete file from storage. Conversations which referenced the doc remain, and their retrieval filter simply excludes the missing doc |
-| Re-indexing | `PATCH /documents/{id}/reprocess` re-queues a `failed` document: status → `uploaded`, chunks purged, counters cleared — the existing worker re-runs the exact same pipeline (docs/api.md §2). Reprocessing `ready` documents stays out of MVP scope |
+| Duplicate files | Per (user, filename) dedupe: an upload colliding with an active row → `409` (docs/api.md §2). `cancelled` rows are excluded from the dedupe (they hold no chunks), so re-uploading a cancelled file just works. The client offers **update** (`POST /documents?replace=true`) or upload under a **new name** (client pre-fills a suggested `name-2.pdf`). Update is reversible: the old row is marked `superseded` immediately (leaves the chat corpus, stays in the table) but keeps its chunks and remembers its previous status; if the replacement reaches `ready` the supersede is finalized (chunks purged), and if it `fails` or is deleted the old document is restored to its previous status (migration 0005 trigger, docs/database.md). The partial unique index `documents_active_filename_idx` enforces this against parallel-upload races |
+| Document deletion | `DELETE /documents/{id}` → soft-delete row + delete chunks (and their embeddings, which live on `document_chunks.embedding`) + delete file from storage. A deletion mid-processing is the worker's stop signal — the in-flight run aborts at the next stage poll. Conversations which referenced the doc remain, and their retrieval filter simply excludes the missing doc |
+| Cancellation | `POST /documents/{id}/cancel` stops a queued/in-flight document: status → `cancelled`, lease cleared; the worker aborts at the next stage poll (docs/ingestion.md §1) |
+| Re-indexing | `PATCH /documents/{id}/reprocess` re-queues a `failed` **or `cancelled`** document: status → `uploaded`, chunks purged, counters cleared — the existing worker re-runs the exact same pipeline (docs/api.md §2). Reprocessing `ready` documents stays out of MVP scope |
 | Replace uploads | `POST /documents?replace=true` marks the old version `superseded` (previous status kept in `superseded_from`, chunks kept) and inserts the replacement with `replaces_document_id` linking back. The `documents_replace_resolution` trigger (migration 0005) resolves the outcome atomically with the worker's transaction: replacement `ready` → old finalized (superseded, chunks purged); replacement `failed` → the failed row leaves the active set, old restored to `superseded_from`; replacement deleted before resolving → old restored the same way |
 | Partial failures | Failures are per-document (parse/embed). Chunks are inserted in one transaction at step 5 → an embedding failure leaves the doc `failed` with no half-written chunks. If a document has zero valid pages, treat as parse failure |
 | Retry | Max 3 attempts, exponential backoff (1s → 5s → 30s), then `failed` |

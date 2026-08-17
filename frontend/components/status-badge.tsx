@@ -9,6 +9,7 @@ const TONES: Record<DocumentStatus, string> = {
   failed: "bg-error-container text-error",
   deleted: "bg-surface-variant text-on-surface-variant",
   superseded: "bg-tertiary-fixed text-on-tertiary-fixed-variant",
+  cancelled: "bg-surface-variant text-on-surface-variant",
 };
 
 export const STATUS_LABELS: Record<DocumentStatus, string> = {
@@ -18,6 +19,7 @@ export const STATUS_LABELS: Record<DocumentStatus, string> = {
   failed: "Failed",
   deleted: "Deleted",
   superseded: "Outdated",
+  cancelled: "Cancelled",
 };
 
 export default function StatusBadge({

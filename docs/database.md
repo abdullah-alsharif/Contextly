@@ -95,7 +95,7 @@ create table profiles (
 );
 
 create type document_status as enum
-  ('uploaded', 'processing', 'ready', 'failed', 'deleted', 'superseded');
+  ('uploaded', 'processing', 'ready', 'failed', 'deleted', 'superseded', 'cancelled');
 
 create table documents (
   id              uuid primary key default gen_random_uuid(),
@@ -116,8 +116,9 @@ create index documents_user_idx on documents (user_id);
 create index documents_user_status_idx on documents (user_id, status) where deleted_at is null;
 
 -- Phase 12 dedupe (docs/ingestion.md §5): at most one active row per
--- (user_id, filename). 'superseded' and deleted rows don't count as active,
--- so a name is reusable once the version holding it is replaced or removed.
+-- (user_id, filename). 'superseded', 'cancelled', and deleted rows don't count
+-- as active, so a name is reusable once the version holding it is replaced,
+-- cancelled, or removed.
 -- (Migration 0005 names the pre-existing statuses because a value added to
 -- an enum is only usable after its transaction commits.)
 create unique index documents_active_filename_idx
