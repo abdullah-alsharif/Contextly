@@ -28,6 +28,7 @@ class OpenRouterProvider:
 
     embedding_model = DEFAULT_MODEL
     embedding_dims = DEFAULT_DIMS
+    embedding_max_input_tokens = 8191  # text-embedding-3-small cap
     supports_streaming = True
 
     def __init__(
@@ -66,6 +67,7 @@ class OpenRouterProvider:
                     provider_name="openrouter",
                     texts=batch,
                     embedding_dims=self.embedding_dims,
+                    max_input_tokens=self.embedding_max_input_tokens,
                     dimensions=self.embedding_dims,
                     retries=self.retries,
                     backoff_seconds=self.backoff_seconds,

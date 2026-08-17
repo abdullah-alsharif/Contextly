@@ -82,12 +82,22 @@ flowchart LR
 
 1. **Read** — fetch bytes from `StorageProvider` by `storage_path` (service credential).
 2. **Parse** — `pypdf` extract text per page; keep `page_number` per chunk. Guard against
-   empty text (scanned PDFs) → mark `failed` with a clear error.
+   empty text (scanned PDFs) → mark `failed` with a clear error. C0 control characters
+   (NUL etc.) from broken PDF encodings are replaced with spaces — Postgres text columns
+   cannot store NUL, and they act as word separators.
 3. **Chunk** — recursive splitting targeting ~500 tokens (~1200 chars for English prose),
    overlap ~50 tokens (~120 chars), never splitting across pages unless unavoidable;
-   record the chunk's starting page. (Tune from eval — see [rag.md](rag.md) §5.)
+   record the chunk's starting page. (Tune from eval — see [rag.md](rag.md) §5.) The
+   window is clamped to the embedding provider's input cap (`embedding_max_input_tokens`
+   × 1.4 chars/token floor — [ai-providers.md](ai-providers.md) §2): code/math-heavy
+   text tokenizes denser than the 2.4 chars/token prose estimate (~1.6 measured on
+   code books), so the clamp keeps
+   chunks under the vendor's hard limit (e.g. ~298 estimated-token windows for
+   `nv-embedqa-e5-v5`'s 512-token cap) instead of failing with a vendor 400.
 4. **Embed** — `AIProvider.embed(batch)` in batches of 16–64 texts; each call failure
-   retries with backoff.
+   retries with backoff. Over-cap inputs are truncated as a last-resort backstop; any
+   text that still draws a deterministic 4xx (except 429) fails the document
+   permanently (no pointless retries — [ai-providers.md](ai-providers.md) §4).
 5. **Persist** — bulk insert `document_chunks` rows with `document_id`, `chunk_index`,
    `content`, `page_number`, `token_count`, `metadata`, `embedding`.
 6. **Finalize** — `documents.status = 'ready'`, `total_chunks = n`.

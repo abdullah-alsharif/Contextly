@@ -32,6 +32,7 @@ class NvidiaProvider:
 
     embedding_model = DEFAULT_MODEL
     embedding_dims = DEFAULT_DIMS
+    embedding_max_input_tokens = 512  # nv-embedqa-e5-v5 hard cap
     supports_streaming = True
 
     def __init__(
@@ -74,6 +75,7 @@ class NvidiaProvider:
                     provider_name="nvidia",
                     texts=batch,
                     embedding_dims=self.embedding_dims,
+                    max_input_tokens=self.embedding_max_input_tokens,
                     extra_body={"input_type": input_type},
                     retries=self.retries,
                     backoff_seconds=self.backoff_seconds,

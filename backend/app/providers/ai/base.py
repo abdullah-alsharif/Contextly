@@ -10,15 +10,22 @@ surface (generate/count_tokens/chat_model) landed in Phase 7
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from logging import getLogger
 from typing import Any, Protocol
+
+logger = getLogger(__name__)
+
+# Chars/token floor for embedding input caps (docs/ai-providers.md §2): the 2.4
+# prose ratio over-sizes code/math text (measured ~1.6 on dense pages).
+EMBED_SAFE_CHARS_PER_TOKEN = 1.4
 
 
 class AIProviderError(Exception):
     """AI backend failure (vendor error, network failure, bad response).
 
     Carries the provider name and, when a vendor responded, its HTTP status so
-    callers can classify permanent (401/403) vs transient failures and logs
-    stay diagnosable (docs/ai-providers.md §2 contract notes).
+    callers can classify permanent vs transient failures (is_transient_status)
+    and logs stay diagnosable (docs/ai-providers.md §2 contract notes).
     """
 
     def __init__(self, message: str, *, provider: str, status_code: int | None = None):
@@ -33,6 +40,7 @@ class AIProvider(Protocol):
 
     embedding_dims: int  # must match the pgvector column dim (validated at startup)
     embedding_model: str  # for logs/metrics
+    embedding_max_input_tokens: int  # vendor per-text input cap; pipeline clamps to it
     chat_model: str  # model used for generation (docs/ai-providers.md §2)
     supports_streaming: bool  # False → callers fall back to one full-answer event
 
@@ -69,6 +77,39 @@ def estimate_tokens(text: str) -> int:
     provider-independent approximation is sufficient for every provider.
     """
     return max(1, len(text) // 4)
+
+
+def is_transient_status(status_code: int | None) -> bool:
+    """True when a vendor status is worth retrying: 4xx (except 429) are
+    deterministic rejections, 5xx/429/network (None) are transient."""
+    return status_code is None or status_code >= 500 or status_code == 429
+
+
+def embedding_cap_chars(max_input_tokens: int) -> int:
+    """Char floor for a vendor's per-text token cap (EMBED_SAFE_CHARS_PER_TOKEN)."""
+    return round(max_input_tokens * EMBED_SAFE_CHARS_PER_TOKEN)
+
+
+def clamp_chunk_size_chars(chunk_size_chars: int, max_input_tokens: int) -> int:
+    """Cap a chunk window so it cannot exceed the model's input cap."""
+    return min(chunk_size_chars, embedding_cap_chars(max_input_tokens))
+
+
+def truncate_to_embedding_cap(texts: list[str], max_input_tokens: int) -> list[str]:
+    """Last-resort backstop for inputs outside the clamped chunking (e.g. long questions)."""
+    cap_chars = embedding_cap_chars(max_input_tokens)
+    truncated = [text[:cap_chars] for text in texts]
+    cut = sum(len(text) > cap_chars for text in texts)
+    if cut:
+        logger.warning(
+            "truncated %d/%d texts to embedding input cap | "
+            "max_input_tokens=%d | cap_chars=%d",
+            cut,
+            len(texts),
+            max_input_tokens,
+            cap_chars,
+        )
+    return truncated
 
 
 def validate_dimension(

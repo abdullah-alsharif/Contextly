@@ -50,7 +50,7 @@ flowchart LR
 | `NEXT_PUBLIC_BACKEND_URL` | Vercel | server-side + client base URL (CSP `connect-src`) |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel | frontend Supabase client (anon key is public by design) |
 | `NEXT_PUBLIC_AUTH_MODE=supabase` | Vercel | switches the proxy from dev cookie to Supabase sessions |
-| `CHUNK_SIZE_TOKENS` | Render | NVIDIA hosted embeddings cap inputs at 512 tokens — use `400` (docs/ai-providers.md §2) |
+| `CHUNK_SIZE_TOKENS` | Render | NVIDIA hosted embeddings cap inputs at 512 tokens — the pipeline clamps chunk windows to the provider cap (~298 estimated tokens) automatically; operator values above that floor are capped, lower values are honored (docs/ai-providers.md §2) |
 
 Never commit real values; keep `.env.example` in the repo, secrets in the hosting
 platforms' secret stores. `render.yaml` marks every secret `sync: false` so it is

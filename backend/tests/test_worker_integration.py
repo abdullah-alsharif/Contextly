@@ -24,7 +24,12 @@ from app import worker
 from app.core.config import Settings
 from app.core.security.identity import Identity
 from app.providers.ai import build_ai_provider
-from app.providers.ai.base import AIProvider, AIProviderError
+from app.providers.ai.base import (
+    AIProvider,
+    AIProviderError,
+    EMBED_SAFE_CHARS_PER_TOKEN,
+)
+from app.providers.ai.fake import FakeProvider
 from app.providers.storage.base import StorageError
 from app.providers.storage.local import LocalStorageProvider
 from app.services import pipeline
@@ -167,7 +172,14 @@ def _fake_ai() -> AIProvider:
 
 
 async def _run_pipeline(document_id: uuid.UUID, storage: LocalStorageProvider) -> str:
-    ai = _fake_ai()
+    return await _run_pipeline_with(document_id, storage, _fake_ai())
+
+
+async def _run_pipeline_with(
+    document_id: uuid.UUID,
+    storage: LocalStorageProvider,
+    ai: AIProvider,
+) -> str:
     async with _SessionFactory() as db:
         claimed = await pipeline.claim_next(db, lease_seconds=LEASE_SECONDS)
         assert claimed is not None, "expected a claimable document"
@@ -721,6 +733,7 @@ class _FailingAI:
 
     embedding_dims = 1024
     embedding_model = "test-failing"
+    embedding_max_input_tokens = 8192  # clamp no-op → chunking unchanged
 
     def __init__(self, status_code: int | None, message: str = "boom"):
         self.status_code = status_code
@@ -732,6 +745,12 @@ class _FailingAI:
         raise AIProviderError(
             self.message, provider="test-failing", status_code=self.status_code
         )
+
+
+class _CappedFakeAI(FakeProvider):
+    """Fake provider exposing nv-embedqa-e5-v5's 512-token cap (docs/ai-providers.md §2)."""
+
+    embedding_max_input_tokens = 512
 
 
 def test_embed_happy_path_fills_chunk_vectors(tmp_path: Path) -> None:
@@ -848,6 +867,65 @@ def test_embed_transient_failure_retries_then_fails(tmp_path: Path) -> None:
         assert row["status_error"]
         assert row["lease_until"] is None
         assert _chunk_rows(document_id) == []  # no half-written chunks
+    finally:
+        _cleanup_document(document_id)
+
+
+def test_embed_400_rejected_is_permanent_no_retry(tmp_path: Path) -> None:
+    """Deterministic 4xx (input too long, retired model) is permanent → no retries."""
+    document_id = uuid.uuid4()
+    storage_path = f"{USER_A}/docs/{document_id}.pdf"
+    storage = LocalStorageProvider(root=tmp_path)
+    data = make_pdf(["Embeddable content, rejected request."])
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
+    _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
+
+    try:
+        ai = _FailingAI(
+            status_code=400,
+            message='{"error":"Input length 576 exceeds maximum allowed token size 512"}',
+        )
+        outcome = asyncio.run(_run_pipeline_with(document_id, storage, ai))
+        assert outcome == "failed"
+        row = _document_row(document_id)
+        assert row["status"] == "failed"
+        assert row["retry_count"] == 0  # deterministic rejection → no retries
+        assert "embedding" in row["status_error"]
+        assert row["lease_until"] is None
+        assert _chunk_rows(document_id) == []
+    finally:
+        _cleanup_document(document_id)
+
+
+def test_code_dense_pdf_chunks_clamped_to_embedding_cap(tmp_path: Path) -> None:
+    """US1: chunks never exceed the provider's max input tokens (code-heavy docs).
+
+    Regression for the reported failure: code/math text tokenizes denser than
+    the 2.4 chars/token prose estimate, so 500-token windows overshoot
+    nv-embedqa-e5-v5's 512-token cap (observed 576).
+    """
+    document_id = uuid.uuid4()
+    storage_path = f"{USER_A}/docs/{document_id}.pdf"
+    storage = LocalStorageProvider(root=tmp_path)
+    code_line = "public static int binarySearch(int[] arr, int target) { return -1; }\n"
+    page = code_line * 30
+    data = make_pdf([page])
+    asyncio.run(
+        storage.upload(key=storage_path, data=data, content_type="application/pdf")
+    )
+    _seed_document(document_id=document_id, user_id=USER_A, storage_path=storage_path)
+
+    try:
+        outcome = asyncio.run(_run_pipeline_with(document_id, storage, _CappedFakeAI()))
+        assert outcome == "ready"
+
+        cap_chars = round(512 * EMBED_SAFE_CHARS_PER_TOKEN)
+        chunks = _chunk_rows(document_id)
+        assert chunks  # code text was embedded, not failed
+        assert all(len(c[1]) <= cap_chars for c in chunks)
+        assert sum(c[3] for c in chunks) > 0
     finally:
         _cleanup_document(document_id)
 

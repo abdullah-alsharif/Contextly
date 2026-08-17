@@ -34,6 +34,7 @@ class FakeProvider:
     embedding_model = "fake-embedding"
     chat_model = "fake-chat"
     supports_streaming = True
+    embedding_max_input_tokens = 8192  # no vendor cap; must not shrink tuned windows
 
     def __init__(self, embedding_dims: int = 1024):
         self.embedding_dims = embedding_dims

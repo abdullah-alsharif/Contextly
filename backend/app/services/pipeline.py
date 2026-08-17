@@ -6,8 +6,9 @@ claiming, this module switches the session transaction-locally to the runtime
 role + the document owner's claim, so every chunk INSERT (including vectors)
 and status UPDATE runs under the FORCE-RLS policies (docs/multi-tenancy.md
 §2/§3, contracts/worker.md §1). Failure classes per contracts/ai-provider.md
-§6: ParseError and embed 401/403 → permanent failed now; transient storage or
-embed failures → deferred-lease retry, then failed.
+§6: ParseError and deterministic embed rejections (4xx except 429) →
+permanent failed now; transient storage or embed failures (429/5xx/network) →
+deferred-lease retry, then failed.
 """
 
 from __future__ import annotations
@@ -26,7 +27,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.providers.ai.base import AIProvider, AIProviderError
+from app.providers.ai.base import (
+    AIProvider,
+    AIProviderError,
+    clamp_chunk_size_chars,
+    is_transient_status,
+)
 from app.providers.storage.base import StorageError, StorageProvider
 from app.services.chunker import CHARS_PER_TOKEN, Chunk, ParseError, chunk_pages
 
@@ -129,6 +135,12 @@ async def claim_next(db: AsyncSession, *, lease_seconds: int) -> ClaimedDocument
     )
 
 
+def _clean_page_text(text: str) -> str:
+    """Replace C0 controls (NUL etc.) from broken PDF encodings — Postgres cannot
+    store NUL and the controls act as word separators (docs/ingestion.md §2)."""
+    return "".join(ch if ch >= " " or ch in "\t\n\r" else " " for ch in text)
+
+
 def parse_pdf(data: bytes) -> list[str]:
     """Extract per-page text (research.md R2). Runs in a thread by the caller."""
     try:
@@ -138,7 +150,7 @@ def parse_pdf(data: bytes) -> list[str]:
                 reader.decrypt("")
             except Exception as exc:  # noqa: BLE001 - map any decrypt failure
                 raise ParseError("corrupt or unreadable PDF") from exc
-        pages = [page.extract_text() or "" for page in reader.pages]
+        pages = [_clean_page_text(page.extract_text() or "") for page in reader.pages]
     except (PdfReadError, PdfStreamError, ValueError, TypeError) as exc:
         raise ParseError("corrupt or unreadable PDF") from exc
     return pages
@@ -227,10 +239,11 @@ async def process_claimed_document(
 ) -> Outcome:
     """Run one claimed document through the pipeline (contracts/worker.md §4–5).
 
-    Failure classes (contracts/ai-provider.md §6): ParseError and embed
-    401/403 are permanent → failed now; StorageError, other AIProviderError
-    statuses, and any unexpected exception (poison PDFs, provider bugs) are
-    transient → deferred-lease retry that exhausts into failed after
+    Failure classes (contracts/ai-provider.md §6): ParseError and deterministic
+    embed rejections (4xx except 429 — bad key, retired model, malformed
+    request) are permanent → failed now; StorageError, other AIProviderError
+    statuses (429/5xx), and any unexpected exception (poison PDFs, provider
+    bugs) are transient → deferred-lease retry that exhausts into failed after
     worker_max_retries. Unexpected exceptions never escape: the worker loop
     must survive arbitrary input (convergence finding F1).
     """
@@ -256,9 +269,13 @@ async def process_claimed_document(
             return await _fail_permanent(db, claimed, message)
 
         try:
+            chunk_size_chars = clamp_chunk_size_chars(
+                round(settings.chunk_size_tokens * CHARS_PER_TOKEN),
+                ai.embedding_max_input_tokens,
+            )
             chunks = chunk_pages(
                 pages,
-                chunk_size_chars=round(settings.chunk_size_tokens * CHARS_PER_TOKEN),
+                chunk_size_chars=chunk_size_chars,
                 overlap_chars=round(settings.chunk_overlap_tokens * CHARS_PER_TOKEN),
             )
         except ParseError as exc:
@@ -274,7 +291,7 @@ async def process_claimed_document(
                 batch_size=settings.embedding_batch_size,
             )
         except AIProviderError as exc:
-            if exc.status_code in (401, 403):
+            if not is_transient_status(exc.status_code):
                 message = f"embedding configuration error: {exc}"
                 logger.warning(
                     "doc %s permanent failure | class=permanent | %s",

@@ -12,6 +12,7 @@ OpenRouter can be swapped without touching retrieval/chat code.
 class AIProvider(Protocol):
     embedding_dims: int                 # must match the pgvector column dim
     embedding_model: str                # for logs/metrics
+    embedding_max_input_tokens: int     # vendor per-text input cap (512 nvidia / 8191 openrouter / huge fake)
     chat_model: str
 
     async def embed(
@@ -39,7 +40,7 @@ Implementations:
 
 | Class | Notes |
 |---|---|
-| `NvidiaProvider` | NVIDIA Build endpoints: embeddings (`nvidia/nv-embedqa-e5-v5`, 1024 dims — the model routed by the hosted NV-API; `nvidia/bge-m3` was retired there and 404s. Asymmetric: requires `input_type` in the request body, query/passage. **Input cap: 512 tokens per text** — operate at `CHUNK_SIZE_TOKENS=400` with real NVIDIA embeddings), chat (`meta/llama-3.3-70b-instruct` or similar free endpoint). Uses `NVIDIA_API_KEY` |
+| `NvidiaProvider` | NVIDIA Build endpoints: embeddings (`nvidia/nv-embedqa-e5-v5`, 1024 dims — the model routed by the hosted NV-API; `nvidia/bge-m3` was retired there and 404s. Asymmetric: requires `input_type` in the request body, query/passage. **Input cap: 512 tokens per text** — enforced, not advisory: the pipeline clamps chunking to the cap via a conservative chars/token floor (`clamp_chunk_size_chars`, ~298 estimated-token windows) and `embed()` truncates anything that still exceeds it, so a vendor 400 on input length can never happen), chat (`meta/llama-3.3-70b-instruct` or similar free endpoint). Uses `NVIDIA_API_KEY` |
 | `OpenRouterProvider` | `openrouter/…` chat + `openai/…` embeddings; uses `OPENROUTER_API_KEY`. Enabled by `AI_PROVIDER=openrouter` |
 
 Selection:
@@ -80,8 +81,9 @@ reject keys that attempt path traversal or omit the tenant prefix.
 ## 4. Failure policy (both abstractions)
 
 - Network/timeout → raise; callers retry with backoff (2 attempts for chat, 3 for embed).
-- 401/403 from vendor → do **not** retry; log and surface `configuration error` — these
-  mean a bad key, not a transient failure.
+- 4xx from vendor (except 429) → do **not** retry; log and surface `configuration error` —
+  these mean a bad key (401/403), a retired model (404), or a malformed request
+  (400/422), none of which a retry can fix.
 - 429 → exponential backoff honoring `Retry-After` when present.
 - All calls emit a metric + structured log with provider, model, latency, and token
   counts where available (see [observability.md](observability.md)).

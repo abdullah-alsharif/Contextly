@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from app.providers.ai.base import AIProviderError
+from app.providers.ai.base import AIProviderError, truncate_to_embedding_cap
 
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
@@ -56,6 +56,7 @@ async def post_embeddings(
     provider_name: str,
     texts: list[str],
     embedding_dims: int,
+    max_input_tokens: int,
     dimensions: int | None = None,
     extra_body: dict[str, object] | None = None,
     retries: int = 3,
@@ -66,8 +67,10 @@ async def post_embeddings(
     """POST texts to an OpenAI-compatible embeddings endpoint.
 
     Returns one vector per input text, in order. Raises AIProviderError on any
-    failure (contracts/ai-provider.md §5).
+    failure (contracts/ai-provider.md §5). Texts past `max_input_tokens` are
+    truncated to the conservative char floor before the request.
     """
+    texts = truncate_to_embedding_cap(texts, max_input_tokens)
     body: dict[str, object] = {"model": model, "input": texts}
     if dimensions is not None:
         body["dimensions"] = dimensions

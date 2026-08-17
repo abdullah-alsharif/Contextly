@@ -43,6 +43,14 @@ Full per-config detail (per-query ranks + diagnostics): `eval/reports/sweep-*.md
   no longer first) and grows context per chunk. Chunks 300–400 drop page recall to
   0.983 — smaller windows split multi-sentence facts and reduce per-page coverage
   (docs/ingestion.md §4.3 page-aware merging).
+- **Note on real NVIDIA embeddings**: the hermetic sweep embeds with the fake
+  provider (unlimited input cap), so the 500-token default is what was measured.
+  With real NVIDIA embeddings (`nv-embedqa-e5-v5`, 512-token cap) the pipeline
+  clamps chunk windows to the provider cap — ~298 estimated tokens — automatically
+  (docs/ai-providers.md §2; the historical "operate at `CHUNK_SIZE_TOKENS=400`"
+  guidance is now enforced in code, not advisory). This is a provider constraint,
+  not a tuning change: 400-token windows measured 0.983 page recall here, and the
+  chunker's page-aware merging keeps multi-sentence facts intact.
 - **Trade-off**: chunk size vs precision — larger chunks keep pages covered but
   blur the document-level ranking (a chunk spanning several pages dilutes the signal
   that picks one document over a similar-topic hard negative); smaller chunks sharpen

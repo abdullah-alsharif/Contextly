@@ -19,7 +19,7 @@ flowchart LR
 
 | Param | Default | Rationale / tuning |
 |---|---|---|
-| Chunk size | ~500 tokens | Long enough to contain facts, short enough to keep context clean |
+| Chunk size | ~500 tokens (clamped to the embedding model's input cap — [ai-providers.md](ai-providers.md) §2) | Long enough to contain facts, short enough to keep context clean |
 | Chunk overlap | ~50 tokens | Boundary resilience for sentences spanning cut points |
 | Top-K | 6 | Enough for good answers; small context; raised only if eval shows misses |
 | Similarity threshold | none (hard) | Rely on top-K + log scores; add a soft floor later after eval |

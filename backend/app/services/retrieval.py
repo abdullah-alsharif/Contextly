@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.security.identity import Identity
-from app.providers.ai.base import AIProvider, AIProviderError
+from app.providers.ai.base import AIProvider, AIProviderError, is_transient_status
 
 logger = getLogger(__name__)
 
@@ -81,8 +81,9 @@ class QuestionEmbeddingError(Exception):
 async def _embed_question(ai: AIProvider, question: str) -> list[float]:
     """Embed the question; one retry on transient failures (docs/rag.md §7).
 
-    401/403 are configuration errors → never retried. Any other failure gets
-    exactly one retry before surfacing as QuestionEmbeddingError.
+    Deterministic vendor rejections (4xx except 429) are never retried; 429,
+    5xx, and network failures get exactly one retry. The provider truncates
+    over-cap questions, so a vendor 400 on length cannot reach this point.
     """
     for attempt in range(2):
         try:
@@ -90,7 +91,7 @@ async def _embed_question(ai: AIProvider, question: str) -> list[float]:
                 await ai.embed([question], input_type="query")
             )[0]
         except AIProviderError as exc:
-            if attempt == 0 and exc.status_code not in (401, 403):
+            if attempt == 0 and is_transient_status(exc.status_code):
                 continue
             raise QuestionEmbeddingError(f"question embedding failed: {exc}") from exc
         except Exception as exc:  # noqa: BLE001 - provider boundary: never leak

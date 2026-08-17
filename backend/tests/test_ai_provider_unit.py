@@ -16,10 +16,18 @@ import pytest
 
 from app.core.config import Settings
 from app.providers.ai import build_ai_provider
-from app.providers.ai.base import AIProvider, AIProviderError, validate_dimension
+from app.providers.ai.base import (
+    AIProvider,
+    AIProviderError,
+    EMBED_SAFE_CHARS_PER_TOKEN,
+    clamp_chunk_size_chars,
+    is_transient_status,
+    validate_dimension,
+)
 from app.providers.ai.fake import FakeProvider
 from app.providers.ai.nvidia import NvidiaProvider
 from app.providers.ai.openrouter import OpenRouterProvider
+from app.services.chunker import CHARS_PER_TOKEN, chunk_pages
 
 NO_BACKOFF = (0.0, 0.0)
 
@@ -107,6 +115,53 @@ def test_dimension_mismatch_fails_fast() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Input-cap policy: status classification + chunk clamping (docs/ai-providers.md §2/§4)
+# ---------------------------------------------------------------------------
+
+
+def test_is_transient_status_classification() -> None:
+    assert is_transient_status(None)  # network failure
+    assert is_transient_status(429)
+    assert is_transient_status(500)
+    assert is_transient_status(503)
+    assert not is_transient_status(400)  # deterministic rejections
+    assert not is_transient_status(401)
+    assert not is_transient_status(403)
+    assert not is_transient_status(404)
+    assert not is_transient_status(422)
+
+
+def test_clamp_keeps_window_for_caps_above_it() -> None:
+    size = round(500 * CHARS_PER_TOKEN)
+    assert clamp_chunk_size_chars(size, 8191) == size
+    assert clamp_chunk_size_chars(size, 8192) == size
+
+
+def test_clamp_shrinks_window_to_nvidia_cap() -> None:
+    # 512-token cap at the 1.4 chars/token floor ≈ 298 estimated-token windows.
+    clamped = clamp_chunk_size_chars(round(500 * CHARS_PER_TOKEN), 512)
+    assert clamped == round(512 * EMBED_SAFE_CHARS_PER_TOKEN)
+    assert clamped < round(500 * CHARS_PER_TOKEN)
+
+
+def test_clamp_honors_smaller_windows() -> None:
+    assert clamp_chunk_size_chars(round(200 * CHARS_PER_TOKEN), 512) == round(
+        200 * CHARS_PER_TOKEN
+    )
+
+
+def test_clamp_bounds_chunk_pages_end_to_end() -> None:
+    size = round(500 * CHARS_PER_TOKEN)
+    clamped = clamp_chunk_size_chars(size, 512)
+    code_page = "int foo = bar(baz);\n" * (clamped // 20 + 2)
+    chunks = chunk_pages(
+        [code_page], chunk_size_chars=clamped, overlap_chars=round(50 * CHARS_PER_TOKEN)
+    )
+    assert chunks
+    assert all(len(c.content) <= clamped for c in chunks)
+
+
+# ---------------------------------------------------------------------------
 # NVIDIA provider via MockTransport (request shape + order preservation)
 # ---------------------------------------------------------------------------
 
@@ -158,6 +213,37 @@ def test_nvidia_embed_forwards_query_input_type() -> None:
     provider = _nvidia_provider(handler)
     asyncio.run(provider.embed(["question?"], input_type="query"))
     assert received[0]["input_type"] == "query"
+
+
+def test_providers_expose_their_input_caps() -> None:
+    # The pipeline clamps chunking to these (docs/ai-providers.md §2).
+    assert NvidiaProvider(api_key="k").embedding_max_input_tokens == 512
+    assert OpenRouterProvider(api_key="k").embedding_max_input_tokens == 8191
+    # Fake never rejects input: its cap must not shrink the tuned 500-token window.
+    assert (
+        FakeProvider().embedding_max_input_tokens * EMBED_SAFE_CHARS_PER_TOKEN
+        >= round(500 * CHARS_PER_TOKEN)
+    )
+
+
+def test_nvidia_truncates_over_cap_text_before_request() -> None:
+    # Input past the 512-token cap must not reach the vendor as-is — the
+    # backstop truncates to the conservative char floor first.
+    cap_chars = round(512 * EMBED_SAFE_CHARS_PER_TOKEN)
+    received: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        received.extend(payload["input"])
+        return httpx.Response(200, json=_ok_payload(payload["input"]))
+
+    provider = _nvidia_provider(handler)
+    long_text = "word " * (cap_chars + 200)
+    vectors = asyncio.run(provider.embed(["short", long_text]))
+    assert len(vectors) == 2
+    assert received[0] == "short"  # in-cap text passes through untouched
+    assert received[1] == long_text[:cap_chars]
+    assert len(received[1]) == cap_chars
 
 
 def test_nvidia_retries_5xx_then_surfaces_error() -> None:
