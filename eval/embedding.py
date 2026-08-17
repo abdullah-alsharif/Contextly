@@ -10,7 +10,9 @@ when `AI_PROVIDER=fake` (CI/hermetic default). It is:
   same texts, same bits, same vectors, reproducible across runs and machines.
   The IDF log uses only IEEE-754 basic arithmetic (a fixed frexp + series in
   `_log`), so results do not depend on the platform libm; `math.sqrt` is
-  correctly rounded per the IEEE spec. Nothing platform-variable remains.
+  correctly rounded per the IEEE spec and the norm uses `math.fsum`
+  (correctly rounded summation, identical across Python versions).
+  Nothing platform-variable remains.
 - **Purely offline**: stdlib only, no model, no network, no keys.
 - **Lexically meaningful**: features are lowercased word unigrams + bigrams with
   stopwords dropped and corpus IDF weights, so co-occurring phrases in the
@@ -120,7 +122,7 @@ class LexicalEmbedder:
             weight = self._idf.get(feature, self._fallback_weight)
             slot = int(hashlib.sha256(feature.encode("utf-8")).hexdigest(), 16) % self.dim
             vec[slot] += weight * count
-        norm = math.sqrt(sum(value * value for value in vec))
+        norm = math.sqrt(math.fsum(value * value for value in vec))
         if norm > 0:
             vec = [value / norm for value in vec]
         return vec
