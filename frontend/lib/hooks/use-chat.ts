@@ -133,6 +133,7 @@ export function useChat(conversationId: string | undefined) {
               ),
             );
             idempotencyKeyRef.current = null;
+            window.dispatchEvent(new CustomEvent("conversations:updated"));
           },
           onError: (message) => {
             setMessages((rows) =>

@@ -90,6 +90,7 @@ def create_app(
         docs_url=None,
         redoc_url=None,
     )
+    app.state.settings = resolved_settings
     app.state.storage_provider = storage_provider or build_storage_provider(
         resolved_settings
     )

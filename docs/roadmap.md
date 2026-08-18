@@ -101,11 +101,24 @@ other; definitions of done are explicit. Parallelizable tracks are marked ⚡.
   whitespace) expands it via the logo-area toggle,
   medium screens start collapsed — see docs/frontend-design.md "Sidebar".
 
+## Phase 13 — Chat multi-turn context
+- **Objective:** referential follow-ups resolve via retrieval-query rewrite; the
+  generation prompt carries a bounded history window; all knobs config-driven.
+- **Components:** `services/chat_context.py` (window fetch/truncate, LLM
+  question rewrite with raw-question fallback, prompt builder), `chat_*`
+  settings, FR-010 request logging, `eval/datasets/conversational.json` +
+  `eval/run_eval.py --dataset conversational`.
+- **Spec:** `specs/014-chat-multi-turn-context/`; details in [chat.md](chat.md) §4
+  and [security.md](security.md) §4.
+- **DoD:** 10-test multi-turn integration matrix green; regression suite green;
+  conversational fixtures clear recall@6 ≥ 0.85 (advisory gate); report committed;
+  docs updated. Zero API/schema change.
+
 ## Dependency graph
 
 ```
 0 → 1 → 2 → 3 → 4 → 6 → 7 → 8
          │         ↕         ↓
-         └→ 5 ──────→ 9/10 → 11 → 12
+         └→ 5 ──────→ 9/10 → 11 → 12 → 13
 ```
 Legend: ⚂ parallelizable, ⚡ preloadable expertise.

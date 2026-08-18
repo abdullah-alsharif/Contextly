@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     # limit is the documented in-process per-user bucket (30 req/min).
     chat_question_max_chars: int = 4000
     rate_limit_chat_per_minute: int = 30
+    # Chat multi-turn context (Phase 13; docs/chat.md §4): rewrite budgets bound
+    # the retrieval-query derivation input; context budgets bound the generation
+    # window — both truncate oldest-first (advisory estimate_tokens caps).
+    chat_rewrite_enabled: bool = True
+    chat_rewrite_max_messages: int = 6  # ~3 turns
+    chat_rewrite_max_tokens: int = 1500
+    chat_context_max_messages: int = 12  # ~6 turns
+    chat_context_max_tokens: int = 2000
     # General (non-chat) API traffic: distinct per-user bucket (docs/security.md
     # §5: "120 req/min general"; docs/deployment.md §3 `RATE_LIMIT_*` knobs).
     rate_limit_general_per_minute: int = 120

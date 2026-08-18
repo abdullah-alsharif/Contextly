@@ -222,7 +222,7 @@ def test_build_prompt_numbers_excerpts_with_locations():
     )
 
     system = messages[0]["content"]
-    assert system.startswith("You answer questions exclusively")
+    assert system.startswith("You answer questions from the provided excerpts")
     assert "Excerpts:" in system
     assert (
         "[1] refund-policy.pdf · page 4\n  The refund period is thirty days." in system

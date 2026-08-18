@@ -554,8 +554,8 @@ export default function Sidebar() {
     }
   }, []);
 
-  // Mount fetch + 5s poll; events refresh on demand: "profile:updated"
-  // (Settings save) updates the chip, "conversations:updated" the lists.
+  // Mount fetch + 30s poll (cross-tab freshness only — same-tab mutations
+  // refresh via "profile:updated" / "conversations:updated" events).
   useEffect(() => {
     let cancelled = false;
     const refreshProfile = () => {
@@ -581,7 +581,7 @@ export default function Sidebar() {
       });
     };
     refreshAll();
-    const timer = window.setInterval(refreshAll, 5000);
+    const timer = window.setInterval(refreshAll, 30000);
     return () => {
       cancelled = true;
       window.removeEventListener("profile:updated", onProfileUpdated);

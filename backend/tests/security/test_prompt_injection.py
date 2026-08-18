@@ -47,7 +47,7 @@ def test_question_is_delimited_as_data() -> None:
 def test_system_rules_precede_question_in_message_order() -> None:
     messages = _build_prompt_messages(_INJECTION_QUESTION, [])
     assert [m["role"] for m in messages] == ["system", "user"]
-    assert messages[0]["content"].startswith("You answer questions exclusively")
+    assert messages[0]["content"].startswith("You answer questions from the provided excerpts")
     assert _INJECTION_QUESTION not in messages[0]["content"]
 
 

@@ -17,6 +17,7 @@ RAG retrieval (top-K 6, per-user + conversation filter)
 LLM answer (streaming SSE)
 Chat history (persistent conversations + messages)
 Source citations (filename + page)
+Multi-turn context (query rewrite + bounded history window, Phase 13)
 Multi-tenant security (RLS + query scoping + storage isolation)
 ```
 
@@ -26,7 +27,7 @@ Multi-tenant security (RLS + query scoping + storage isolation)
 |---|---|---|
 | Document reprocessing | added for `failed` docs (Phase 12); re-indexing of `ready` docs stays out | when tuning changes chunking |
 | Multiple providers in prod | one `AI_PROVIDER` at a time behind the interface | when NVIDIA free tier weakens |
-| Hybrid search / reranking / query rewriting | no evidence of need; adds complexity | when eval recall@K or demo fails |
+| Hybrid search / reranking | no evidence of need; adds complexity | when eval recall@K or demo fails |
 | Parent–child retrieval | tuning overhead | when answer quality demands smaller chunks |
 | Non-PDF types (docx, txt, etc.) | parser surface per type | second milestone |
 | Async frontend status push | polling `GET /documents` is fine in MVP | when processing > ~1 min routinely |

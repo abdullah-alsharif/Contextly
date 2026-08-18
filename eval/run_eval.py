@@ -28,6 +28,7 @@ import asyncio
 import json
 import pathlib
 import sys
+import uuid
 from dataclasses import dataclass, field
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -46,7 +47,11 @@ from eval.embedding import LexicalEmbedder  # noqa: E402
 
 DOCUMENTS_DIR = REPO_ROOT / "eval" / "documents"
 DATASET_PATH = REPO_ROOT / "eval" / "datasets" / "qa.json"
+CONVERSATIONAL_DATASET_PATH = REPO_ROOT / "eval" / "datasets" / "conversational.json"
 DEFAULT_REPORT_PATH = REPO_ROOT / "eval" / "reports" / "rag-eval.md"
+DEFAULT_CONVERSATIONAL_REPORT_PATH = (
+    REPO_ROOT / "eval" / "reports" / "conversational-eval.md"
+)
 
 _SYSTEM_PROMPT = """You answer questions exclusively from the provided excerpts below.
 If the answer is not in the excerpts, say "I don't know based on your documents."
@@ -92,6 +97,7 @@ class QueryResult:
     answer: str = ""
     answer_correct: bool = False
     grounded: bool = False
+    raw_query: str = ""  # the verbatim user question when the query was derived
 
 
 @dataclass
@@ -108,6 +114,8 @@ class EvalSummary:
     page_mrr: float
     grounding: float
     correctness: float
+    dataset: str = "qa"
+    advisory: bool = False  # conversational set: threshold is advisory, not gated
 
     @property
     def gate_pass(self) -> bool:
@@ -174,13 +182,31 @@ def load_corpus() -> list[ChunkRecord]:
     return records
 
 
-def load_queries() -> list[dict]:
-    """Load + integrity-check eval/datasets/qa.json against the seed corpus."""
+def load_queries(dataset: str = "qa") -> list[dict]:
+    """Load + integrity-check the chosen dataset against the seed corpus.
+
+    `qa` mirrors the Phase 10 contract (40-60 entries, docs/testing.md §6).
+    `conversational` (specs/014-chat-multi-turn-context US3) requires >= 10
+    referential follow-ups, each with a `history` list containing at least one
+    user turn; the same page/fact integrity checks apply.
+    """
     settings = get_settings()
-    if not DATASET_PATH.exists():
-        raise SystemExit(f"missing dataset: {DATASET_PATH}")
-    queries = json.loads(DATASET_PATH.read_text())["queries"]
-    if not 40 <= len(queries) <= 60:
+    if dataset == "conversational":
+        path = CONVERSATIONAL_DATASET_PATH
+        min_queries = 10
+    else:
+        path = DATASET_PATH
+        min_queries = 40
+    if not path.exists():
+        raise SystemExit(f"missing dataset: {path}")
+    queries = json.loads(path.read_text())["queries"]
+    if dataset == "conversational":
+        if len(queries) < min_queries:
+            raise SystemExit(
+                f"dataset must hold >= {min_queries} queries "
+                f"(specs/014-chat-multi-turn-context US3), got {len(queries)}"
+            )
+    elif not 40 <= len(queries) <= 60:
         raise SystemExit(
             f"dataset must hold 40-60 queries (docs/testing.md §6), got {len(queries)}"
         )
@@ -192,6 +218,11 @@ def load_queries() -> list[dict]:
             page_text[(filename, index)] = text
     errors: list[str] = []
     for item in queries:
+        if dataset == "conversational" and not _has_history(item):
+            errors.append(
+                f"conversational entries must carry a history with >= 1 user turn "
+                f"({item['question']!r})"
+            )
         doc = item["expected_document"]
         page = item["expected_page"]
         hard = item["hard_negative_document"]
@@ -210,11 +241,55 @@ def load_queries() -> list[dict]:
                         f"{doc} p{page}: answer_contains {needle!r} not on the page "
                         f"(dataset/seed drift)"
                     )
-        if settings.rag_query_max_chars and len(item["query"]) > settings.rag_query_max_chars:
+        text = item.get("question") or item.get("query", "")
+        if settings.rag_query_max_chars and len(text) > settings.rag_query_max_chars:
             errors.append(f"query exceeds rag_query_max_chars={settings.rag_query_max_chars}")
     if errors:
         raise SystemExit("dataset integrity failures:\n  - " + "\n  - ".join(errors))
     return queries
+
+
+def _has_history(item: dict) -> bool:
+    history = item.get("history")
+    return isinstance(history, list) and any(
+        isinstance(m, dict) and m.get("role") == "user" and m.get("content")
+        for m in history
+    )
+
+
+async def derive_conversational_query(
+    item: dict, *, lexical: bool, ai: AIProvider
+) -> str:
+    """Derive the retrieval query for a referential follow-up (spec US1).
+
+    Hermetic (lexical) mode concatenates the history's user turns with the
+    current question — a deterministic stand-in for conversation-aware query
+    derivation (docs/chat.md §4.1). Real providers run the product's own
+    rewrite path (`app.services.chat_context.rewrite_question`, LLM
+    standalone-question rewrite with raw-question fallback).
+    """
+    question = item["question"]
+    history = item["history"]
+    if lexical:
+        prior = " ".join(
+            m["content"] for m in history if m.get("role") == "user"
+        )
+        return f"{prior} {question}".strip()
+    from app.services.chat_context import (
+        ContextMessage,
+        HistoryWindow,
+        rewrite_question,
+    )
+
+    window = HistoryWindow(
+        messages=[
+            ContextMessage(id=uuid.uuid4(), role=m["role"], content=m["content"])
+            for m in history
+        ],
+        total_tokens=0,
+    )
+    query, _marker = await rewrite_question(ai, question, window, enabled=True)
+    return query
 
 
 def _use_lexical(settings: Settings, embedding: str) -> bool:
@@ -319,6 +394,7 @@ def rank_query(
         page_mrr=1.0 / (page_rank + 1) if page_rank is not None else 0.0,
         hard_negative_before_expected=hard_before,
         hits=hits,
+        raw_query=query.get("raw_query", ""),
     )
 
 
@@ -354,6 +430,11 @@ async def run(settings: Settings, args: argparse.Namespace, corpus: list[ChunkRe
     top_k = settings.retrieval_top_k if args.top_k is None else args.top_k
     results: list[QueryResult] = []
     for index, query in enumerate(queries):
+        if getattr(args, "dataset", "qa") == "conversational":
+            derived = await derive_conversational_query(
+                query, lexical=lexical is not None, ai=ai
+            )
+            query = {**query, "query": derived, "raw_query": query["question"]}
         if lexical is not None:
             qvec = (await asyncio.to_thread(lexical.embed, [query["query"]]))[0]
         else:
@@ -376,6 +457,8 @@ async def run(settings: Settings, args: argparse.Namespace, corpus: list[ChunkRe
         page_mrr=sum(r.page_mrr for r in results) / n,
         grounding=sum(r.grounded for r in results) / n,
         correctness=sum(r.answer_correct for r in results) / n,
+        dataset=getattr(args, "dataset", "qa"),
+        advisory=getattr(args, "dataset", "qa") == "conversational",
     )
 
 
@@ -384,10 +467,16 @@ def render_report(summary: EvalSummary, real_provider: bool) -> str:
     lines: list[str] = []
     a = lines.append
     corpus = summary.corpus
-    a("# Contextly - RAG Evaluation Report (Phase 10)")
+    conversational = summary.dataset == "conversational"
+    phase = "Phase 13 — conversational multi-turn" if conversational else "Phase 10"
+    a(f"# Contextly - RAG Evaluation Report ({phase})")
     a("")
-    a("**Reproduce:** `PYTHONPATH=backend python3 -m eval.run_eval "
-      "--out eval/reports/rag-eval.md`")
+    if conversational:
+        a("**Reproduce:** `PYTHONPATH=backend python3 -m eval.run_eval "
+          "--dataset conversational --out eval/reports/conversational-eval.md`")
+    else:
+        a("**Reproduce:** `PYTHONPATH=backend python3 -m eval.run_eval "
+          "--out eval/reports/rag-eval.md`")
     a(f"**Embedding:** `{summary.embedding_name}` (provider: `{summary.provider_name}`) - "
       + (
           "hermetic lexical proxy; real embeddings are the documented opt-in "
@@ -404,25 +493,36 @@ def render_report(summary: EvalSummary, real_provider: bool) -> str:
     a("")
     a("| Metric | Value | Gate |")
     a("|---|---|---|")
+    gate_note = "advisory" if summary.advisory else (
+        "**PASS**" if summary.gate_pass else "**FAIL**")
     a(f"| recall@6 (expected document in top-{summary.top_k}) | "
       f"{summary.recall_at_6:.3f} | "
-      f"{'**PASS**' if summary.gate_pass else '**FAIL**'} (≥ {summary.threshold:.2f}) |")
+      f"{gate_note} (≥ {summary.threshold:.2f}) |")
     a(f"| MRR (document) | {summary.mrr:.3f} | |")
     a(f"| recall@6 (expected page covered by a chunk) | {summary.page_recall_at_6:.3f} | "
-      f"{'**PASS**' if summary.gate_pass else '**FAIL**'} (≥ {summary.threshold:.2f}) |")
+      f"{gate_note} (≥ {summary.threshold:.2f}) |")
     a(f"| MRR (page coverage) | {summary.page_mrr:.3f} | |")
     a(f"| Grounding (answer facts in retrieved excerpts) | {summary.grounding:.3f} | |")
     a(f"| Answer correctness (rule-based judge, generated answer) | "
       f"{summary.correctness:.3f} | |")
     a("")
+    if conversational:
+        a("> The conversational set is **advisory**: the Phase 13 spec does not gate "
+          "the exit code on it (SC-001 is a quality target, specs/014-chat-multi-turn-"
+          "context/spec.md §6).")
+        a("")
     a("> Answer correctness reflects the generation provider: the fake provider's "
       "canned stub scores ~0 (plumbing only, docs/testing.md §6); real providers "
       "score the true answer quality.")
     a("")
     a("## Per-query detail")
     a("")
-    a("| # | Query | Expected | Top-1 | Doc rank | MRR | Page @6 | Flag |")
-    a("|---|---|---|---|---|---|---|---|")
+    if conversational:
+        a("| # | Raw question | Derived query | Expected | Top-1 | Doc rank | MRR | Page @6 | Flag |")
+        a("|---|---|---|---|---|---|---|---|---|---|")
+    else:
+        a("| # | Query | Expected | Top-1 | Doc rank | MRR | Page @6 | Flag |")
+        a("|---|---|---|---|---|---|---|---|")
     for r in sorted(summary.queries, key=lambda r: r.index):
         flag = "🚩 expected doc not in top-K" if not r.doc_recall else (
             "⚠️ expected doc not first" if r.doc_rank != 0 else ""
@@ -432,8 +532,12 @@ def render_report(summary: EvalSummary, real_provider: bool) -> str:
         exp = f"{r.expected_document} p{r.expected_page}"
         top1 = r.top_hit.label if r.top_hit else "-"
         doc_rank = str(r.doc_rank) if r.doc_rank is not None else "-"
-        a(f"| {r.index + 1} | {r.query} | {exp} | {top1} | {doc_rank} | "
-          f"{r.mrr:.3f} | {'✅' if r.page_recall else '-'} | {flag} |")
+        if conversational:
+            a(f"| {r.index + 1} | {r.raw_query} | {r.query} | {exp} | {top1} | "
+              f"{doc_rank} | {r.mrr:.3f} | {'✅' if r.page_recall else '-'} | {flag} |")
+        else:
+            a(f"| {r.index + 1} | {r.query} | {exp} | {top1} | {doc_rank} | "
+              f"{r.mrr:.3f} | {'✅' if r.page_recall else '-'} | {flag} |")
     a("")
     a("## Diagnostics")
     a("")
@@ -445,7 +549,8 @@ def render_report(summary: EvalSummary, real_provider: bool) -> str:
         a("_None - every query retrieved the expected document at rank 0._")
     else:
         for r in flagged:
-            a(f"### {r.index + 1}. {r.query}")
+            label = r.raw_query or r.query
+            a(f"### {r.index + 1}. {label}")
             a("")
             a(f"- Expected: `{r.expected_document}` p{r.expected_page} "
               f"(hard negative: `{r.hard_negative_document}`)")
@@ -463,7 +568,8 @@ def render_report(summary: EvalSummary, real_provider: bool) -> str:
           "document (the similar-topic trap won):")
         a("")
         for r in hard_wins:
-            a(f"- {r.index + 1}. {r.query} — expected `{r.expected_document}` p"
+            label = r.raw_query or r.query
+            a(f"- {r.index + 1}. {label} — expected `{r.expected_document}` p"
               f"{r.expected_page}, `{r.hard_negative_document}` ranked first")
     else:
         a("_No hard-negative trap was triggered: the expected document always "
@@ -479,6 +585,14 @@ def render_report(summary: EvalSummary, real_provider: bool) -> str:
       f"product's pgvector `embedding <-> query`, retrieval.py), top-K "
       f"{summary.top_k}; ties broken deterministically by `(filename, page, "
       "chunk_index)`.")
+    if conversational:
+        a("- Conversational queries are **referential**: the follow-up alone cannot "
+          "resolve the referent, so the harness derives the retrieval query from "
+          "history + question (specs/014-chat-multi-turn-context US1, docs/chat.md "
+          "§4.1). Hermetic (lexical) mode "
+          "concatenates the history's user turns with the current question "
+          "(deterministic stand-in); real providers run the product's "
+          "`rewrite_question` LLM rewrite with raw-question fallback.")
     a("- `recall@6`: expected document present in the top-K chunks (docs/testing.md §6). "
       "Page coverage: an expected page lies inside a retrieved chunk's "
       "[page_start, page_end] - the chunker merges short pages so page citations "
@@ -505,8 +619,12 @@ def parse_args() -> argparse.Namespace:
                              "docs/roadmap.md Phase 10)")
     parser.add_argument("--embedding", choices=("auto", "lexical", "real"), default="auto",
                         help="auto: lexical for AI_PROVIDER=fake, real for real providers")
+    parser.add_argument("--dataset", choices=("qa", "conversational"), default="qa",
+                        help="qa: Phase 10 fixture (default); conversational: Phase 13 "
+                             "referential follow-ups (advisory gate)")
     parser.add_argument("--out", type=pathlib.Path, default=None,
-                        help="write the report here (default: eval/reports/rag-eval.md)")
+                        help="write the report here (default: eval/reports/rag-eval.md, "
+                             "or conversational-eval.md for --dataset conversational)")
     parser.add_argument("--no-gate", action="store_true",
                         help="never exit non-zero on a failed threshold")
     return parser.parse_args()
@@ -522,11 +640,15 @@ def main() -> None:
     if args.top_k is not None:
         settings.retrieval_top_k = args.top_k
     corpus = load_corpus()
-    queries = load_queries()
+    queries = load_queries(args.dataset)
     summary = asyncio.run(run(settings, args, corpus, queries))
 
     report = render_report(summary, not _use_lexical(settings, args.embedding))
-    out_path = args.out or DEFAULT_REPORT_PATH
+    out_path = args.out or (
+        DEFAULT_CONVERSATIONAL_REPORT_PATH
+        if args.dataset == "conversational"
+        else DEFAULT_REPORT_PATH
+    )
     # Guard against probing runs (e.g. CHUNK_SIZE_TOKENS overrides) silently
     # clobbering the committed baseline report at the default path.
     baseline = (
@@ -550,7 +672,7 @@ def main() -> None:
           f"gate={'PASS' if summary.gate_pass else 'FAIL'} (>={summary.threshold:.2f})")
     print(f"report: {out_path}")
 
-    if not args.no_gate and not summary.gate_pass:
+    if not args.no_gate and not summary.gate_pass and not summary.advisory:
         print(
             f"GATE FAILURE: recall@6 {summary.recall_at_6:.3f} / "
             f"page_recall@6 {summary.page_recall_at_6:.3f} < {summary.threshold:.2f} "

@@ -76,6 +76,17 @@ def get_session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
     return factory
 
 
+def get_app_settings(request: Request) -> Settings:
+    """The app-scoped settings (create_app's, overridable in tests).
+
+    Mirrors the provider/limiter pattern: per-app configuration lives on
+    `app.state` so tests can inject a Settings object and the send pipeline
+    honors it (docs/chat.md §6 knobs).
+    """
+    settings: Settings = request.app.state.settings
+    return settings
+
+
 def _format_sse(event: str, data: dict[str, Any]) -> str:
     """One SSE block: `event: <name>` + `data: <json>` (docs/api.md §4)."""
     payload = json.dumps(data, default=str)
@@ -127,7 +138,7 @@ async def send_message(
     body: MessageSendIn,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     identity: Identity = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
+    settings: Settings = Depends(get_app_settings),
     ai: AIProvider = Depends(get_ai_provider),
     in_flight: InFlightRegistry = Depends(get_in_flight_registry),
     session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),

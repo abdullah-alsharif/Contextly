@@ -184,3 +184,86 @@ def test_dataset_detects_phrasing_drift(tmp_path) -> None:
             module.load_queries()
     finally:
         module.DATASET_PATH = original
+
+
+# --- Phase 13: conversational dataset (referential follow-ups) ---------------
+
+
+def test_conversational_dataset_integrity() -> None:
+    """Conversational entries: >= 10 referential follow-ups, each with history."""
+    from eval.run_eval import load_queries
+
+    queries = load_queries("conversational")
+    assert len(queries) >= 10
+    for item in queries:
+        assert "history" in item and "question" in item
+        assert any(
+            m.get("role") == "user" and m.get("content") for m in item["history"]
+        )
+
+
+def test_conversational_dataset_detects_missing_history(tmp_path) -> None:
+    """An entry without user turns must fail the conversational integrity check."""
+    from eval import run_eval as module
+
+    tampered = tmp_path / "conversational.json"
+    tampered.write_text(
+        module.CONVERSATIONAL_DATASET_PATH.read_text().replace(
+            '"history"', '"nope"', 1
+        )
+    )
+    original = module.CONVERSATIONAL_DATASET_PATH
+    module.CONVERSATIONAL_DATASET_PATH = tampered
+    try:
+        with pytest.raises(SystemExit, match="dataset integrity failures"):
+            module.load_queries("conversational")
+    finally:
+        module.CONVERSATIONAL_DATASET_PATH = original
+
+
+def test_conversational_eval_derives_queries_from_history() -> None:
+    """The Phase 13 fixtures must clear recall@6 >= 0.85 with the derived query.
+
+    The hermetic derivation concatenates the history's user turns with the
+    follow-up (docs/chat.md §4.1), which is what makes referential questions
+    retrievable at all (specs/014-chat-multi-turn-context US1).
+    """
+    from app.core.config import get_settings
+    from eval.run_eval import load_corpus, load_queries, run
+
+    args = argparse.Namespace(
+        threshold=0.85, embedding="auto", top_k=None, dataset="conversational"
+    )
+    settings = get_settings()
+    corpus = load_corpus()
+    queries = load_queries("conversational")
+    summary = asyncio.run(run(settings, args, corpus, queries))
+    assert summary.dataset == "conversational"
+    assert summary.advisory is True
+    assert all(r.raw_query for r in summary.queries)
+    assert any(r.query != r.raw_query for r in summary.queries)
+    assert summary.recall_at_6 >= 0.85
+    assert summary.page_recall_at_6 >= 0.85
+
+
+def test_conversational_report_is_deterministic() -> None:
+    """Conversational report renders byte-identically across runs."""
+    from app.core.config import get_settings
+    from eval.run_eval import load_corpus, load_queries, render_report, run
+
+    args = argparse.Namespace(
+        threshold=0.85, embedding="auto", top_k=None, dataset="conversational"
+    )
+    settings = get_settings()
+    corpus = load_corpus()
+    queries = load_queries("conversational")
+
+    async def _render() -> str:
+        summary = await run(settings, args, corpus, queries)
+        return render_report(summary, False)
+
+    first = asyncio.run(_render())
+    second = asyncio.run(_render())
+    assert first == second
+    assert "Phase 13" in first
+    assert "advisory" in first

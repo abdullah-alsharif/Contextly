@@ -25,6 +25,7 @@ export default function ChatPage() {
       const conversation = await createConversation({
         document_ids: selectedIds.length > 0 ? selectedIds : undefined,
       });
+      window.dispatchEvent(new CustomEvent("conversations:updated"));
       router.push(`/chat/${conversation.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create the conversation.");
