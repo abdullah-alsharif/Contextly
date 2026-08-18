@@ -47,11 +47,10 @@ test("smoke: login → upload → ready → chat → cite", async ({ page }) => 
   await page.getByRole("button", { name: "New Conversation" }).click();
   await expect(page).toHaveURL(/\/chat\/[0-9a-f-]{36}$/);
 
-  // Context panel mirrors selection in the composer ("Using: …" chip).
+  // Context panel mirrors the conversation's selection.
   await expect(page.locator('aside').filter({ hasText: "Context Selection" })).toContainText(
     "sample.pdf",
   );
-  await expect(page.getByText(/Using:/)).toBeVisible();
 
   // -- Ask: typing indicator → deltas → done with a [1] citation chip --------
   await page.getByRole("textbox", { name: "Message" }).fill(QUESTION);

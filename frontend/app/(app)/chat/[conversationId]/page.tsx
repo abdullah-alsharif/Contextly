@@ -1,10 +1,8 @@
 "use client";
 
-// Chat workspace (docs/frontend-design.md §4; docs/chat.md §4–6): context
-// panel + streaming message list + sticky composer; citation chips open the
-// source viewer; AI Context Bar glows while pending (spec FR-014). Archived
-// conversations keep the same workspace but swap the composer for an
-// archived notice + Unarchive action.
+// Chat workspace: context panel + streaming message list + composer; citation
+// chips open the source viewer; archived conversations swap the composer for
+// an archived notice + Unarchive action.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import ChatComposer from "@/components/chat-composer";
@@ -39,8 +37,8 @@ export default function ConversationPage() {
   const [activeSource, setActiveSource] = useState<Source | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Selection resets derive during render: conversation switch clears,
-  // detail load restores the persisted set (PATCH replace, contract C3).
+  // Selection resets derive during render: switch clears, detail load
+  // restores the persisted set.
   const [prevConversationId, setPrevConversationId] = useState(conversationId);
   const [prevDetailId, setPrevDetailId] = useState<string | null>(null);
   if (conversationId !== prevConversationId) {
@@ -60,10 +58,7 @@ export default function ConversationPage() {
   const persistSelection = useCallback(
     (ids: string[]) => {
       setSelectedIds(ids);
-      if (detail && conversationId) {
-        // Fire-and-forget; the context panel stays responsive.
-        void setDocuments(ids);
-      }
+      if (detail && conversationId) void setDocuments(ids);
     },
     [setDocuments, detail, conversationId],
   );
@@ -73,7 +68,7 @@ export default function ConversationPage() {
     [allReadyDocuments, selectedIds],
   );
 
-  // AI Context Bar state (spec FR-014).
+  // AI Context Bar glow follows the streaming state.
   useEffect(() => {
     document
       .getElementById("ai-context-bar")
@@ -81,8 +76,7 @@ export default function ConversationPage() {
     return () => document.getElementById("ai-context-bar")?.classList.remove("active");
   }, [streaming]);
 
-  // Sidebar rename/archive reloads this page — same tab via window event,
-  // other tabs via BroadcastChannel.
+  // Sidebar rename/archive reloads this page (same tab + cross-tab).
   useEffect(() => {
     const onConversationsUpdated = () => reload();
     window.addEventListener("conversations:updated", onConversationsUpdated);
@@ -95,7 +89,37 @@ export default function ConversationPage() {
 
   const archived = detail?.conversation.archived ?? false;
 
-  // Unarchive from the archived footer; the sidebar refreshes via the event.
+  // Auto-scroll: pin to the bottom until the user scrolls away. The latch
+  // keeps mid-stream renders from fighting the user's scroll gesture.
+  const stickToBottom = useRef(true);
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const onScroll = () => {
+      const atBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight < 24;
+      if (atBottom !== stickToBottom.current) stickToBottom.current = atBottom;
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  }, []);
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || !stickToBottom.current) return;
+    container.scrollTop = container.scrollHeight;
+  });
+
+  // Opening a source pauses auto-follow: the side panel narrows the column
+  // and reflows messages taller, so pinning would yank the viewport away.
+  const handleCite = useCallback(
+    (source: Source) => {
+      stickToBottom.current = false;
+      setActiveSource(source);
+    },
+    [],
+  );
+
+  // Unarchive; the sidebar refreshes via the event.
   const handleUnarchive = useCallback(async () => {
     if (!conversationId) return;
     try {
@@ -104,26 +128,9 @@ export default function ConversationPage() {
       notifyCrossTab("conversations:updated");
       reload();
     } catch {
-      // stays archived; the Unarchive action remains available
+      // stay archived; the action remains available
     }
   }, [conversationId, reload]);
-
-  // Auto-scroll: jump on new messages; while streaming, follow only when the
-  // user is already near the bottom (so scrolling up isn't overridden).
-  const scrollTracker = useRef<{ messageId: string | null }>({ messageId: null });
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const last = messages[messages.length - 1];
-    const lastId = last?.localId ?? null;
-    const newMessage = lastId !== scrollTracker.current.messageId;
-    scrollTracker.current.messageId = lastId;
-    const nearBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 120;
-    if (newMessage || (streaming && nearBottom)) {
-      container.scrollTop = container.scrollHeight;
-    }
-  });
 
   const loading = conversationLoading || messagesLoading;
 
@@ -137,7 +144,10 @@ export default function ConversationPage() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <div ref={scrollRef} className="custom-scrollbar flex-1 overflow-y-auto px-6 py-6">
+        <div
+          ref={scrollRef}
+          className="custom-scrollbar [overflow-anchor:none] flex-1 overflow-y-auto px-6 py-6"
+        >
           {loading ? (
             <EmptyState icon="hourglass_empty" title="Loading conversation…" />
           ) : conversationError ? (
@@ -168,7 +178,7 @@ export default function ConversationPage() {
                     sources={message.sources ?? []}
                     pending={message.pending}
                     failed={message.failed}
-                    onCite={message.role === "assistant" ? setActiveSource : undefined}
+                    onCite={message.role === "assistant" ? handleCite : undefined}
                   />
                   {message.failed && message.role === "assistant" && (
                     <div className="mt-1.5 flex items-center gap-2 pl-11">
@@ -211,9 +221,6 @@ export default function ConversationPage() {
         ) : (
           <ChatComposer
             selectedDocuments={selectedDocuments}
-            onRemoveDocument={(id) =>
-              persistSelection(selectedIds.filter((selected) => selected !== id))
-            }
             onAddDocuments={() => setPickerOpen(true)}
             onSend={(content) => void send(content)}
             busy={streaming}

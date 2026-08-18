@@ -7,8 +7,6 @@ import { expect, test } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/sample.pdf", import.meta.url));
-const usingRow = (page: import("@playwright/test").Page) =>
-  page.locator("div").filter({ hasText: /^Using:/ });
 
 test("context: desktop panel manages selection, mobile picker adds", async ({
   page,
@@ -95,8 +93,6 @@ test("context: desktop panel manages selection, mobile picker adds", async ({
   await expect(docCheckbox).not.toBeChecked();
   await docCheckbox.check();
   await expect(panel.getByText("1 of 1 selected")).toBeVisible();
-  await expect(page.getByText("Using:", { exact: true })).toBeVisible();
-  await expect(usingRow(page).getByText("sample.pdf", { exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "Message" }).fill("hello");
   await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
 
@@ -133,9 +129,7 @@ test("context: desktop panel manages selection, mobile picker adds", async ({
   await picker4.getByRole("button", { name: "Add (1)" }).click();
   await expect(picker4).not.toBeVisible();
 
-  // Composer is unblocked and mirrors the new selection.
-  await expect(page.getByText(/Using:/)).toBeVisible();
-  await expect(usingRow(page).getByText("sample.pdf", { exact: true })).toBeVisible();
+  // Composer is unblocked and carries the new selection.
   await page.getByRole("textbox", { name: "Message" }).fill("hello");
   await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
 });

@@ -1,14 +1,11 @@
-// Chat composer — mirrors prototypes/chat.html: rounded-2xl surface card
-// with border + shadow, body-md textarea, ghost add-documents action, square
-// accent send with shadow, centered disclaimer. Blocks send when no
-// documents are selected (pre-empts the backend 400, docs/chat.md §6).
+// Chat composer: rounded surface card with textarea, ghost add-documents
+// action and accent send; blocks send when no documents are selected.
 "use client";
 
 import { useRef, useState, type KeyboardEvent } from "react";
 
 interface ChatComposerProps {
   selectedDocuments: { id: string; filename: string }[];
-  onRemoveDocument: (id: string) => void;
   onAddDocuments: () => void;
   onSend: (content: string) => void;
   busy: boolean;
@@ -16,7 +13,6 @@ interface ChatComposerProps {
 
 export default function ChatComposer({
   selectedDocuments,
-  onRemoveDocument,
   onAddDocuments,
   onSend,
   busy,
@@ -47,30 +43,6 @@ export default function ChatComposer({
 
   return (
     <div className="border-t border-surface-variant bg-surface-container-lowest px-4 py-4">
-      {selectedDocuments.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          <span className="font-display text-label-sm text-on-surface-variant">Using:</span>
-          {selectedDocuments.map((document) => (
-            <span
-              key={document.id}
-              className="inline-flex max-w-48 items-center gap-1 rounded-full bg-surface-container-high px-2.5 py-0.5"
-            >
-              <span className="truncate font-display text-label-sm text-on-surface">
-                {document.filename}
-              </span>
-              <button
-                type="button"
-                onClick={() => onRemoveDocument(document.id)}
-                aria-label={`Remove ${document.filename}`}
-                className="text-on-surface-variant transition-colors hover:text-secondary"
-              >
-                <span className="material-symbols-outlined text-sm">close</span>
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
       <div className="flex items-end gap-2 rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
         <button
           type="button"
