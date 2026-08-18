@@ -146,7 +146,7 @@ export default function ConversationPage() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div
           ref={scrollRef}
-          className="custom-scrollbar [overflow-anchor:none] flex-1 overflow-y-auto px-6 py-6"
+          className="custom-scrollbar [overflow-anchor:none] flex-1 overflow-y-auto px-4 py-5 md:px-6 md:py-6"
         >
           {loading ? (
             <EmptyState icon="hourglass_empty" title="Loading conversation…" />
@@ -160,11 +160,24 @@ export default function ConversationPage() {
             ) : (
               <EmptyState
                 icon="waving_hand"
-                title={selectedDocuments.length ? "Ask anything" : "Select documents on the left"}
+                title={
+                  selectedDocuments.length ? "Ask anything" : "Pick documents, then ask"
+                }
                 hint={
-                  selectedDocuments.length
-                    ? "Your question will be answered from the selected documents with cited sources."
-                    : "Pick at least one ready document to use as context, then ask your first question."
+                  selectedDocuments.length ? (
+                    "Your question will be answered from the selected documents with cited sources."
+                  ) : (
+                    <>
+                      <span className="lg:hidden">
+                        Tap the + below the message box to add documents from your
+                        library, then ask your first question.
+                      </span>
+                      <span className="hidden lg:inline">
+                        Select at least one ready document in the panel on the left,
+                        then ask your first question.
+                      </span>
+                    </>
+                  )
                 }
               />
             )

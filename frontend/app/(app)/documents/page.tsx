@@ -22,31 +22,36 @@ export default function DocumentsPage() {
         title="Documents Space"
         subtitle="Upload PDFs and ask questions across your knowledge base."
       />
-      <div className="mx-auto w-full max-w-container-max px-8 py-8">
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3" aria-label="Library stats">
-        <StatCard
-          label="Documents"
-          value={String(stats.total)}
-          icon="folder_open"
-          hint={`${stats.total} file${stats.total === 1 ? "" : "s"} in your library`}
-        />
-        <StatCard
-          label="Ready to chat"
-          value={String(stats.ready)}
-          icon="check_circle"
-          hint={`${stats.processing} processing`}
-        />
-        <StatCard
-          label="Indexed"
-          value={stats.totalChunks > 0 ? stats.totalChunks.toLocaleString() : "0"}
-          icon="database"
-          hint={
-            stats.totalBytes > 0
-              ? `${formatBytes(stats.totalBytes, 1)} stored`
-              : "0 MB stored"
-          }
-        />
-      </section>
+      <div className="mx-auto w-full max-w-container-max px-4 py-6 md:px-8 md:py-8">
+        <section
+          className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-4"
+          aria-label="Library stats"
+        >
+          <StatCard
+            label="Documents"
+            value={String(stats.total)}
+            icon="folder_open"
+            hint={`${stats.total} file${stats.total === 1 ? "" : "s"} in your library`}
+          />
+          <StatCard
+            label="Ready to chat"
+            value={String(stats.ready)}
+            icon="check_circle"
+            hint={`${stats.processing} processing`}
+          />
+          <div className="hidden sm:block">
+            <StatCard
+              label="Indexed"
+              value={stats.totalChunks > 0 ? stats.totalChunks.toLocaleString() : "0"}
+              icon="database"
+              hint={
+                stats.totalBytes > 0
+                  ? `${formatBytes(stats.totalBytes, 1)} stored`
+                  : "0 MB stored"
+              }
+            />
+          </div>
+        </section>
 
       <section className="mt-6">
         <UploadDropzone upload={upload} documents={documents} />

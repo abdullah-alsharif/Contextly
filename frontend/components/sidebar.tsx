@@ -1,12 +1,13 @@
 "use client";
 
-// ChatGPT-style sidebar (docs/frontend-design.md §2): logo header with search
-// + collapse, Documents, New Conversation, Pinned/Recents/Archived, account.
-// Desktop collapses to a 64px icon rail; mobile gets an overlay drawer.
+// ChatGPT-style sidebar (docs/frontend-design.md §2): brand header with
+// search + collapse, Documents, New Conversation, Pinned/Recents/Archived.
+// Desktop collapses to a 64px rail; mobile opens an overlay drawer.
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import ConversationSearch from "@/components/conversation-search";
+import MenuMark from "@/components/menu-mark";
 import SidebarConversationRow, {
   type RowActions,
 } from "@/components/sidebar-conversation-row";
@@ -21,9 +22,9 @@ import {
   type ConversationSearchResult,
 } from "@/lib/api-client";
 import { notifyCrossTab, subscribeCrossTab } from "@/lib/cross-tab";
+import { useShell } from "@/lib/shell-context";
 
 const SEARCH_RECENTS = 7;
-const SIDEBAR_COLLAPSED_KEY = "contextly:sidebar-collapsed";
 // Slow cross-device poll; same-browser tabs sync instantly via BroadcastChannel.
 const VISIBLE_POLL_MS = 300_000;
 
@@ -496,6 +497,7 @@ function SidebarBody({
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { collapsed, drawerOpen, toggleSidebar, expandSidebar, closeDrawer } = useShell();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [archived, setArchived] = useState<Conversation[]>([]);
   const [showPinned, setShowPinned] = useState(true);
@@ -503,11 +505,7 @@ export default function Sidebar() {
   const [showArchived, setShowArchived] = useState(false);
   const [fullName, setFullName] = useState<string>("");
   const [email, setEmail] = useState<string>("");
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  // Client-only (localStorage, innerWidth): applied on mount to avoid a
-  // hydration mismatch with the server's expanded render.
-  const [collapsed, setCollapsed] = useState(false);
   const [searchPreserved, setSearchPreserved] = useState<PreservedSearch | null>(
     null,
   );
@@ -516,33 +514,6 @@ export default function Sidebar() {
   useEffect(() => {
     searchOpenRef.current = searchOpen;
   }, [searchOpen]);
-
-  const toggleCollapsed = useCallback(() => {
-    setCollapsed((current) => {
-      const next = !current;
-      try {
-        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
-      } catch {
-        // storage unavailable — the toggle still works for the session
-      }
-      return next;
-    });
-  }, []);
-
-  // Apply the persisted preference (or medium-screen rule) after hydration.
-  useEffect(() => {
-    // Deferred out of the synchronous effect path; runs right after paint.
-    const frame = window.requestAnimationFrame(() => {
-      let stored: string | null = null;
-      try {
-        stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-      } catch {
-        // fall back to the viewport rule
-      }
-      setCollapsed(stored !== null ? stored === "1" : window.innerWidth < 1024);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -707,11 +678,10 @@ export default function Sidebar() {
 
   // Drawer closes on navigation (derived during render), Escape, or overlay
   // click; Escape inside the search popup stays with it.
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const [prevNavPathname, setPrevNavPathname] = useState(pathname);
   if (pathname !== prevNavPathname) {
     setPrevNavPathname(pathname);
-    setDrawerOpen(false);
+    closeDrawer();
   }
   useEffect(() => {
     if (drawerOpen) drawerCloseRef.current?.focus({ preventScroll: true });
@@ -727,7 +697,7 @@ export default function Sidebar() {
 
   // Rail icons: expand and open the target section, then scroll to it.
   const focusSection = useCallback((name: "pinned" | "recent" | "archived") => {
-    setCollapsed(false);
+    expandSidebar();
     setShowPinned(true);
     setShowRecent(true);
     setShowArchived(true);
@@ -736,7 +706,7 @@ export default function Sidebar() {
         .querySelector<HTMLElement>(`[data-section="${name}"]`)
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 220);
-  }, []);
+  }, [expandSidebar]);
 
   const bodyProps: SidebarBodyProps = {
     pinned,
@@ -768,12 +738,12 @@ export default function Sidebar() {
           if (!collapsed) return;
           const target = event.target as HTMLElement;
           if (target.closest("a, button, [data-rail-guard]")) return;
-          toggleCollapsed();
+          toggleSidebar();
         }}
       >
         {collapsed ? (
           <div className="flex flex-col items-center gap-2 px-2 pb-2 pt-3">
-            <RailLogo onExpand={toggleCollapsed} />
+            <RailLogo onExpand={toggleSidebar} />
             <IconButton size="lg" href="/documents" label="Documents" icon="description" />
           </div>
         ) : (
@@ -789,7 +759,7 @@ export default function Sidebar() {
               <IconButton
                 label="Collapse sidebar"
                 icon="left_panel_close"
-                onClick={toggleCollapsed}
+                onClick={toggleSidebar}
               />
             </div>
           </div>
@@ -828,19 +798,17 @@ export default function Sidebar() {
         <SidebarBody {...bodyProps} />
       </aside>
 
-      {/* Mobile: floating trigger + overlay drawer */}
+      {/* Mobile: floating two-line mark trigger + overlay drawer */}
       <button
         type="button"
-        onClick={() => setDrawerOpen(true)}
+        onClick={toggleSidebar}
         aria-label="Open navigation"
         aria-expanded={drawerOpen}
-        className={`sb-root fixed left-2 top-2 z-40 flex h-8 w-8 items-center justify-center rounded-lg border border-sb-border bg-sb-bg text-sb-icon shadow-sm transition-colors duration-100 hover:bg-sb-hover hover:text-sb-text md:hidden ${
+        className={`sb-root fixed left-[max(0.75rem,env(safe-area-inset-left))] top-[max(0.75rem,env(safe-area-inset-top))] z-40 flex h-10 w-10 items-center justify-center rounded-lg border border-sb-border bg-sb-bg text-sb-icon shadow-sm transition-colors duration-100 hover:bg-sb-hover hover:text-sb-text md:hidden ${
           drawerOpen ? "invisible" : ""
         }`}
       >
-        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
-          menu
-        </span>
+        <MenuMark />
       </button>
       {drawerOpen && (
         <div
@@ -855,10 +823,11 @@ export default function Sidebar() {
             aria-hidden="true"
           />
           <aside className="sb-root drawer-in absolute inset-y-0 left-0 flex w-[272px] flex-col bg-sb-bg shadow-lg">
-            <div className="flex h-16 shrink-0 items-center justify-between px-4">
+            <div className="flex h-16 shrink-0 items-center justify-between px-4 pt-[env(safe-area-inset-top)]">
               <Brand />
               <div className="flex items-center gap-1">
                 <IconButton
+                  size="lg"
                   label="Search conversations"
                   tooltip="Search chats"
                   icon="search"
@@ -869,7 +838,7 @@ export default function Sidebar() {
                   type="button"
                   onClick={closeDrawer}
                   aria-label="Close navigation"
-                  className="flex h-9 w-9 items-center justify-center rounded-lg text-sb-icon transition-colors duration-100 hover:bg-sb-hover hover:text-sb-text"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg text-sb-icon transition-colors duration-100 hover:bg-sb-hover hover:text-sb-text"
                 >
                   <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
                     close

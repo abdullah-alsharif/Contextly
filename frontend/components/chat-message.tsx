@@ -143,7 +143,7 @@ function CopyButton({ content, align }: { content: string; align: "left" | "righ
   );
   return (
     <div
-      className={`mt-1 flex opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100 ${
+      className={`mt-1 flex md:opacity-0 md:transition-opacity md:duration-150 md:group-hover:opacity-100 focus-within:opacity-100 ${
         align === "right" ? "justify-end" : ""
       }`}
     >

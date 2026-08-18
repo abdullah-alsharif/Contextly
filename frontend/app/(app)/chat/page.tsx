@@ -42,11 +42,22 @@ export default function ChatPage() {
         selectedIds={selectedIds}
         setSelectedIds={setSelectedIds}
       />
-      <div className="flex min-w-0 flex-1 flex-col items-center justify-center px-8">
+      <div className="flex min-w-0 flex-1 flex-col items-center justify-center px-4 md:px-8">
         <EmptyState
           icon="forum"
           title="Start your first conversation"
-          hint="Select documents in the context panel, then create a conversation to ask questions with cited answers."
+          hint={
+            <>
+              <span className="lg:hidden">
+                Create a conversation, then add documents from your library to ask
+                questions with cited answers.
+              </span>
+              <span className="hidden lg:inline">
+                Select documents in the context panel, then create a conversation to
+                ask questions with cited answers.
+              </span>
+            </>
+          }
         />
         <button
           type="button"

@@ -42,14 +42,14 @@ export default function ChatComposer({
   };
 
   return (
-    <div className="border-t border-surface-variant bg-surface-container-lowest px-4 py-4">
-      <div className="flex items-end gap-2 rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+    <div className="border-t border-surface-variant bg-surface-container-lowest px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:py-4">
+      <div className="flex items-end gap-2 rounded-2xl border border-outline-variant bg-surface-container-lowest p-3 shadow-sm md:p-4">
         <button
           type="button"
           onClick={onAddDocuments}
           title="Add documents"
           aria-label="Add documents"
-          className="shrink-0 rounded p-1 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-secondary lg:hidden"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container hover:text-secondary lg:hidden"
         >
           <span className="material-symbols-outlined" aria-hidden="true">
             add
@@ -80,7 +80,7 @@ export default function ChatComposer({
           disabled={!canSend}
           onClick={() => submit(value)}
           aria-label="Send message"
-          className="flex shrink-0 items-center justify-center rounded-lg bg-secondary p-2 text-on-secondary shadow-sm transition-transform hover:bg-secondary/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-secondary p-2 text-on-secondary shadow-sm transition-transform hover:bg-secondary/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <span className="material-symbols-outlined fill">send</span>
         </button>

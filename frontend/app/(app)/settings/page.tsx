@@ -47,7 +47,7 @@ export default function SettingsPage() {
         title="Settings"
         subtitle="Account preferences for your workspace."
       />
-      <div className="mx-auto w-full max-w-container-max px-8 py-8">
+      <div className="mx-auto w-full max-w-container-max px-4 py-6 md:px-8 md:py-8">
         <section className="rounded-xl border border-outline-variant bg-surface-container-lowest">
           <div className="border-b border-surface-variant px-6 py-4">
             <h2 className="font-display text-title-lg text-on-surface">Profile</h2>

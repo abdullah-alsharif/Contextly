@@ -2,12 +2,12 @@
 interface EmptyStateProps {
   icon: string;
   title: string;
-  hint?: string;
+  hint?: React.ReactNode;
 }
 
 export default function EmptyState({ icon, title, hint }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center gap-3 py-16 text-center">
+    <div className="flex flex-col items-center gap-3 py-10 text-center sm:py-16">
       <span className="material-symbols-outlined text-5xl text-on-surface-variant" aria-hidden="true">
         {icon}
       </span>
