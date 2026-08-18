@@ -55,13 +55,17 @@ check: ## Local CI gate (mirrors .github/workflows/ci.yml) + every script
 	# Backend steps run in the compose backend container (DB-gated pytest +
 	# security matrix, like CI's postgres service); eval and frontend steps run
 	# on the host. Brings up db/backend/worker itself and leaves them running.
+	# The worker is parked during pytest: it polls the same DB and could steal
+	# test-seeded claims (CI has no long-running worker, so it never races).
 	# Covers: ruff/mypy/migrate/pytest/matrix, eval, eval-sweep, tsc, eslint,
 	# audit, security:check, next build, and the Playwright smoke (via `smoke`).
 	docker compose up -d db backend worker
 	docker compose exec backend ruff check app tests
 	docker compose exec backend mypy app
 	docker compose exec backend python -m app.migrate
+	docker compose stop worker
 	docker compose exec backend pytest -q
+	docker compose start worker
 	docker compose exec backend sh -c 'count=$$(pytest tests/security/test_multi_tenancy_matrix.py --collect-only -q | grep -c "::"); echo "security matrix tests collected: $$count"; test "$$count" = "10" && pytest tests/security/test_multi_tenancy_matrix.py -q'
 	APP_ENV=dev AI_PROVIDER=fake $(PYTHON) -m ruff check --config backend/pyproject.toml eval
 	APP_ENV=dev AI_PROVIDER=fake PYTHONPATH=backend $(PYTHON) -m eval.run_eval --out eval/reports/rag-eval.md
