@@ -10,6 +10,7 @@ import {
   type Message,
   type Source,
 } from "@/lib/api-client";
+import { notifyCrossTab } from "@/lib/cross-tab";
 
 export interface StreamingMessage {
   role: "user" | "assistant";
@@ -134,6 +135,7 @@ export function useChat(conversationId: string | undefined) {
             );
             idempotencyKeyRef.current = null;
             window.dispatchEvent(new CustomEvent("conversations:updated"));
+            notifyCrossTab("conversations:updated");
           },
           onError: (message) => {
             setMessages((rows) =>

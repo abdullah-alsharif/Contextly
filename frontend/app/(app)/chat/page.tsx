@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import ContextPanel from "@/components/context-panel";
 import EmptyState from "@/components/empty-state";
 import { createConversation } from "@/lib/api-client";
+import { notifyCrossTab } from "@/lib/cross-tab";
 import { useDocuments } from "@/lib/hooks/use-documents";
 
 export default function ChatPage() {
@@ -26,6 +27,7 @@ export default function ChatPage() {
         document_ids: selectedIds.length > 0 ? selectedIds : undefined,
       });
       window.dispatchEvent(new CustomEvent("conversations:updated"));
+      notifyCrossTab("conversations:updated");
       router.push(`/chat/${conversation.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create the conversation.");

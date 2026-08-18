@@ -14,6 +14,7 @@ import DocumentPicker from "@/components/document-picker";
 import EmptyState from "@/components/empty-state";
 import SourceViewer from "@/components/source-viewer";
 import { updateConversation, type Source } from "@/lib/api-client";
+import { notifyCrossTab, subscribeCrossTab } from "@/lib/cross-tab";
 import { useChat } from "@/lib/hooks/use-chat";
 import { useConversationDetail } from "@/lib/hooks/use-conversations";
 import { useDocuments } from "@/lib/hooks/use-documents";
@@ -80,12 +81,16 @@ export default function ConversationPage() {
     return () => document.getElementById("ai-context-bar")?.classList.remove("active");
   }, [streaming]);
 
-  // The sidebar can archive/rename the open conversation — reload to reflect it.
+  // Sidebar rename/archive reloads this page — same tab via window event,
+  // other tabs via BroadcastChannel.
   useEffect(() => {
     const onConversationsUpdated = () => reload();
     window.addEventListener("conversations:updated", onConversationsUpdated);
-    return () =>
+    const unsubscribe = subscribeCrossTab("conversations:updated", onConversationsUpdated);
+    return () => {
       window.removeEventListener("conversations:updated", onConversationsUpdated);
+      unsubscribe();
+    };
   }, [reload]);
 
   const archived = detail?.conversation.archived ?? false;
@@ -96,6 +101,7 @@ export default function ConversationPage() {
     try {
       await updateConversation(conversationId, { archived: false });
       window.dispatchEvent(new CustomEvent("conversations:updated"));
+      notifyCrossTab("conversations:updated");
       reload();
     } catch {
       // stays archived; the Unarchive action remains available

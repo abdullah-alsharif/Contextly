@@ -20,9 +20,12 @@ import {
   type Conversation,
   type ConversationSearchResult,
 } from "@/lib/api-client";
+import { notifyCrossTab, subscribeCrossTab } from "@/lib/cross-tab";
 
 const SEARCH_RECENTS = 7;
 const SIDEBAR_COLLAPSED_KEY = "contextly:sidebar-collapsed";
+// Slow cross-device poll; same-browser tabs sync instantly via BroadcastChannel.
+const VISIBLE_POLL_MS = 300_000;
 
 // Kept while a result is open so returning to Search restores it.
 interface PreservedSearch {
@@ -554,8 +557,9 @@ export default function Sidebar() {
     }
   }, []);
 
-  // Mount fetch + 30s poll (cross-tab freshness only — same-tab mutations
-  // refresh via "profile:updated" / "conversations:updated" events).
+  // Mount fetch + slow poll: same-tab mutations refresh via window events,
+  // other same-origin tabs via BroadcastChannel; the poll is cross-device
+  // freshness only, skipped while hidden, and catches up on tab re-focus.
   useEffect(() => {
     let cancelled = false;
     const refreshProfile = () => {
@@ -575,17 +579,31 @@ export default function Sidebar() {
       if (!cancelled) void refresh();
     };
     window.addEventListener("conversations:updated", onConversationsUpdated);
+    const unsubscribeProfile = subscribeCrossTab("profile:updated", onProfileUpdated);
+    const unsubscribeConversations = subscribeCrossTab(
+      "conversations:updated",
+      onConversationsUpdated,
+    );
     const refreshAll = () => {
       void refresh().then(() => {
         if (!cancelled) refreshProfile();
       });
     };
     refreshAll();
-    const timer = window.setInterval(refreshAll, 30000);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshAll();
+    }, VISIBLE_POLL_MS);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshAll();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
       window.removeEventListener("profile:updated", onProfileUpdated);
       window.removeEventListener("conversations:updated", onConversationsUpdated);
+      unsubscribeProfile();
+      unsubscribeConversations();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       window.clearInterval(timer);
     };
   }, [refresh]);
@@ -595,6 +613,7 @@ export default function Sidebar() {
       const updated = await updateConversation(id, body);
       // Keep the open conversation page in sync without waiting for its fetch.
       window.dispatchEvent(new CustomEvent("conversations:updated"));
+      notifyCrossTab("conversations:updated");
       setConversations((rows) =>
         rows
           .map((row) => (row.id === id ? updated : row))

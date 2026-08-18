@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import PageTitleBar from "@/components/page-title-bar";
 import { getProfile, updateProfile } from "@/lib/api-client";
+import { notifyCrossTab } from "@/lib/cross-tab";
 
 export default function SettingsPage() {
   const [fullName, setFullName] = useState("");
@@ -32,6 +33,7 @@ export default function SettingsPage() {
       setFullName(profile.full_name ?? "");
       setStatus("saved");
       window.dispatchEvent(new CustomEvent("profile:updated"));
+      notifyCrossTab("profile:updated");
     } catch {
       setStatus("error");
     } finally {
