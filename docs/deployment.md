@@ -39,7 +39,7 @@ flowchart LR
 
 | Var | Where | Notes |
 |---|---|---|
-| `DATABASE_URL` | Render (web) | runtime role (`contextly_app`, NOBYPASSRLS) |
+| `DATABASE_URL` | Render (web) | runtime role (`contextly_app.<ref>`, NOBYPASSRLS; ref suffix required for pooler routing) |
 | `MIGRATION_DATABASE_URL` | operator machine (pre-deploy, see §4) | migration connection (see §4); never the runtime role |
 | `SUPABASE_URL` | Render, Vercel | |
 | `SUPABASE_SERVICE_ROLE_KEY` | Render only | backend storage ops |
@@ -139,8 +139,10 @@ Repeatable from empty accounts; no tribal knowledge. Replace `<…>` with your v
 - Verify: `schema_migrations` lists `0001_init.sql` … `0008_replace_restore.sql`.
 
 **3. Runtime DB URL**
-- `DATABASE_URL=postgresql://contextly_app:<runtime-pw>@<db-host>:5432/postgres?sslmode=require`
+- `DATABASE_URL=postgresql://contextly_app.<ref>:<runtime-pw>@aws-<n>-<region>.pooler.supabase.com:5432/postgres?sslmode=require`
   (the NOBYPASSRLS runtime role — RLS is the enforcement boundary, docs/security.md §2).
+  The pooler routes by tenant through the username suffix `.<ref>` — without it you get
+  `FATAL: no tenant identifier provided`.
 
 **4. Render (blueprint)**
 - Push this repo to GitHub; in Render, "New → Blueprint" and pick the repo — it reads
