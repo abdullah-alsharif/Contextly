@@ -11,6 +11,6 @@ COPY infrastructure/migrations ./infrastructure/migrations
 
 EXPOSE 8000
 
-# One image for web + worker: the worker runs when CONTEXTLY_WORKER=1, else
-# uvicorn binds $PORT (Render free allows no startCommand with a docker runtime).
-CMD ["sh", "-c", "if [ \"$CONTEXTLY_WORKER\" = \"1\" ]; then python -m app.worker; else uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+# Render free has no worker service type — run it alongside uvicorn in the web
+# container; the wake cron keeps the service awake (docs/deployment.md §2, §9).
+CMD ["sh", "-c", "python -m app.worker & exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

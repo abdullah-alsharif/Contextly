@@ -28,17 +28,18 @@ flowchart LR
 ```
 
 - Next.js runs server-side API calls; the browser never holds backend credentials.
-- FastAPI service and the DB-backed worker run from **one image** (web + background
-  worker via `render.yaml`): the Dockerfile CMD picks the process
-  (`CONTEXTLY_WORKER=1` → `python -m app.worker`, else uvicorn on `$PORT`) — the
-  free tier does not allow `startCommand` or `preDeployCommand` with a docker
-  runtime, so process selection and migrations live outside `render.yaml`.
+- FastAPI and the DB-backed worker run as **two processes in one web container**
+  (Render's free tier has no background-worker service type): the Dockerfile CMD
+  starts `python -m app.worker` in the background and uvicorn in the foreground.
+  A wake cron (free scheduler, §9 step 8) keeps the free web service from spinning
+  down, so the worker keeps polling. Cold-start delay on the first request after an
+  idle spell is expected (§8).
 
 ## 3. Environment variables
 
 | Var | Where | Notes |
 |---|---|---|
-| `DATABASE_URL` | Render (web + worker) | runtime role (`contextly_app`, NOBYPASSRLS) |
+| `DATABASE_URL` | Render (web) | runtime role (`contextly_app`, NOBYPASSRLS) |
 | `MIGRATION_DATABASE_URL` | operator machine (pre-deploy, see §4) | migration connection (see §4); never the runtime role |
 | `SUPABASE_URL` | Render, Vercel | |
 | `SUPABASE_SERVICE_ROLE_KEY` | Render only | backend storage ops |
@@ -143,13 +144,13 @@ Repeatable from empty accounts; no tribal knowledge. Replace `<…>` with your v
 
 **4. Render (blueprint)**
 - Push this repo to GitHub; in Render, "New → Blueprint" and pick the repo — it reads
-  `render.yaml` (web `contextly-backend` + worker `contextly-worker`).
-- Fill the `sync: false` secrets for both services: `DATABASE_URL`, `MIGRATION_DATABASE_URL`,
+  `render.yaml` (one web service `contextly-backend` running uvicorn + worker).
+- Fill the `sync: false` secrets: `DATABASE_URL`, `MIGRATION_DATABASE_URL`,
   `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NVIDIA_API_KEY` (or switch
-  `AI_PROVIDER=openrouter` + its key).
+  `AI_PROVIDER=openrouter` + its key), `SUPABASE_JWKS_URL`.
 - Set `CORS_ORIGINS=https://<app>.vercel.app` once the Vercel project exists (step 5).
-- Deploy. The web service's health check is `/healthz` (DB + AI-provider booleans, §5);
-  the worker runs from the same image via `CONTEXTLY_WORKER=1` (§2).
+- Deploy. The health check is `/healthz` (DB + AI-provider booleans, §5); the worker
+  runs as a second process in the same container (§2).
 
 **5. Vercel**
 - Import the repo (Git integration, Next.js preset). Add env:

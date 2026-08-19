@@ -69,7 +69,7 @@ and grant access to this repo — approve those prompts.
 
 1. Sign up at **render.com** (GitHub sign-in). Hobby plans are free.
 2. That's the whole account part — the service definition is the committed
-   `render.yaml` (web `contextly-backend` + worker `contextly-worker`). You only need
+   `render.yaml` (web `contextly-backend` — uvicorn + worker in one container). You only need
    to run the blueprint once (Part B, step 3) and fill in the secrets.
 3. No Render CLI needed; the dashboard handles it.
 
