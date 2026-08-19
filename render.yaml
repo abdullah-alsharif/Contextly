@@ -7,7 +7,7 @@ services:
   - type: web
     name: contextly-backend
     runtime: docker
-    repo: https://github.com/YOUR_ORG/contextly
+    repo: https://github.com/abdullah-alsharif/Contextly
     plan: free
     branch: main
     autoDeploy: true
@@ -55,7 +55,7 @@ services:
   - type: worker
     name: contextly-worker
     runtime: docker
-    repo: https://github.com/YOUR_ORG/contextly
+    repo: https://github.com/abdullah-alsharif/Contextly
     plan: free
     branch: main
     autoDeploy: true

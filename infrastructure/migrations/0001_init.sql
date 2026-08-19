@@ -12,21 +12,29 @@ create extension if not exists vector;
 --    policies call auth.uid(). The shim mirrors Supabase's current cloud
 --    implementation (coalesce over request.jwt.claim.sub and the Postgres 14+
 --    fallback request.jwt.claims) so the same SQL works everywhere.
-create schema if not exists auth;
+--    On Supabase the real auth schema already exists and is owned by
+--    supabase_auth_admin — creating tables there is forbidden even for the
+--    postgres role — so the shim is skipped when the schema is present.
+do $shim$
+begin
+    if not exists (select 1 from pg_catalog.pg_namespace where nspname = 'auth') then
+        create schema auth;
 
-create table if not exists auth.users (
-    id uuid primary key
-);
+        create table auth.users (
+            id uuid primary key
+        );
 
-create or replace function auth.uid() returns uuid
-    language sql
-    stable
-as $$
-    select coalesce(
-        nullif(current_setting('request.jwt.claim.sub', true), ''),
-        (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
-    )::uuid
-$$;
+        create or replace function auth.uid() returns uuid
+            language sql
+            stable
+        as $func$
+            select coalesce(
+                nullif(current_setting('request.jwt.claim.sub', true), ''),
+                (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+            )::uuid
+        $func$;
+    end if;
+end $shim$;
 
 -- 3. Document status enum
 create type document_status as enum ('uploaded', 'processing', 'ready', 'failed', 'deleted');
