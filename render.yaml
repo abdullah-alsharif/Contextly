@@ -1,7 +1,7 @@
-# Render blueprint — Contextly $0 stack (docs/deployment.md §2, §4, §6).
-# Two free-plan services: FastAPI web (/healthz, migrations as preDeployCommand)
-# and the DB-backed worker. `sync: false` values live only in Render's secret
-# store — nothing real is committed (docs/security.md §5-6).
+# Render blueprint — Contextly $0 stack (docs/deployment.md §2, §4).
+# Web + worker share one image (Dockerfile CMD picks the process). Free tier has
+# no preDeployCommand, so migrations run manually first (docs/deployment.md §4,
+# §9 step 2). `sync: false` values live only in Render's secret store.
 
 services:
   - type: web
@@ -12,7 +12,7 @@ services:
     branch: main
     autoDeploy: true
     healthCheckPath: /healthz
-    preDeployCommand: python -m app.migrate
+    # No preDeployCommand on free — migrations run manually before deploy.
     dockerContext: .
     dockerfilePath: backend/Dockerfile
     envVars:
@@ -59,10 +59,11 @@ services:
     plan: free
     branch: main
     autoDeploy: true
-    startCommand: python -m app.worker
     dockerContext: .
     dockerfilePath: backend/Dockerfile
     envVars:
+      - key: CONTEXTLY_WORKER
+        value: "1"
       - key: APP_ENV
         value: production
       - key: AUTH_MODE

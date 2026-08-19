@@ -28,15 +28,18 @@ flowchart LR
 ```
 
 - Next.js runs server-side API calls; the browser never holds backend credentials.
-- FastAPI service also runs the DB-backed worker as a second process on the same
-  instance (Render free allows one web + background workers via `render.yaml`).
+- FastAPI service and the DB-backed worker run from **one image** (web + background
+  worker via `render.yaml`): the Dockerfile CMD picks the process
+  (`CONTEXTLY_WORKER=1` → `python -m app.worker`, else uvicorn on `$PORT`) — the
+  free tier does not allow `startCommand` or `preDeployCommand` with a docker
+  runtime, so process selection and migrations live outside `render.yaml`.
 
 ## 3. Environment variables
 
 | Var | Where | Notes |
 |---|---|---|
 | `DATABASE_URL` | Render (web + worker) | runtime role (`contextly_app`, NOBYPASSRLS) |
-| `MIGRATION_DATABASE_URL` | Render pre-deploy only | migration connection (see §4); never the runtime role |
+| `MIGRATION_DATABASE_URL` | operator machine (pre-deploy, see §4) | migration connection (see §4); never the runtime role |
 | `SUPABASE_URL` | Render, Vercel | |
 | `SUPABASE_SERVICE_ROLE_KEY` | Render only | backend storage ops |
 | `STORAGE_PROVIDER=supabase` | Render | `local` rejected when `APP_ENV != dev` (startup guard) |
@@ -59,8 +62,11 @@ filled in the Render dashboard/CLI only.
 ## 4. Migrations
 
 - SQL migration files in `infrastructure/migrations/` (numbered `0001_*.sql`, …).
-- Run via `python -m app.migrate` (Phase 0 runner; `alembic` is not used) as a Render
-  pre-deploy step (`render.yaml` `preDeployCommand`) or from an operator machine.
+- Run via `python -m app.migrate` (Phase 0 runner; `alembic` is not used) **from an
+  operator machine before deploy** — Render's free tier has no `preDeployCommand`,
+  and the runner's ledger is idempotent, so a later no-op run costs nothing. (Paid
+  Render plans may add `preDeployCommand: python -m app.migrate`; the same command,
+  same ledger.)
 - Never run migrations against Supabase with the runtime role — use the migration
   connection (`MIGRATION_DATABASE_URL`, a migration-capable role; the Supabase SQL
   editor in dev). The runner prefers `MIGRATION_DATABASE_URL` over `DATABASE_URL`
@@ -68,9 +74,9 @@ filled in the Render dashboard/CLI only.
   refused at the runner, not the database (deploy blocker, `app/migrate.py`).
 - Supabase specifics: migrations that create roles/run multi-statement files must use
   a **session-mode** connection (direct port, `sslmode=require`), not the transaction
-  pooler. The migration files ship inside the backend image
-  (`backend/Dockerfile` copies `infrastructure/migrations/`), so the pre-deploy step
-  finds them with `migrations_dir` at its default.
+  pooler. The migration files also ship inside the backend image
+  (`backend/Dockerfile` copies `infrastructure/migrations/`), so an operator can run
+  them from the running container with the same `MIGRATION_DATABASE_URL`.
 
 ## 5. CORS & production hardening
 
@@ -127,8 +133,9 @@ Repeatable from empty accounts; no tribal knowledge. Replace `<…>` with your v
 
 **2. Migrations**
 - `MIGRATION_DATABASE_URL=<migration connection, session-mode>` + `python -m app.migrate`
-  from the operator machine (or let the Render pre-deploy step run it after step 4).
-- Verify: `schema_migrations` lists `0001_init.sql` … `0004_conversation_messages.sql`.
+  from the operator machine. This is **mandatory on the free tier** (no
+  `preDeployCommand`); the ledger is idempotent, so re-runs no-op.
+- Verify: `schema_migrations` lists `0001_init.sql` … `0008_replace_restore.sql`.
 
 **3. Runtime DB URL**
 - `DATABASE_URL=postgresql://contextly_app:<runtime-pw>@<db-host>:5432/postgres?sslmode=require`
@@ -141,8 +148,8 @@ Repeatable from empty accounts; no tribal knowledge. Replace `<…>` with your v
   `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NVIDIA_API_KEY` (or switch
   `AI_PROVIDER=openrouter` + its key).
 - Set `CORS_ORIGINS=https://<app>.vercel.app` once the Vercel project exists (step 5).
-- Deploy. The web service's `preDeployCommand` runs migrations; its health check is
-  `/healthz` (DB + AI-provider booleans, §5).
+- Deploy. The web service's health check is `/healthz` (DB + AI-provider booleans, §5);
+  the worker runs from the same image via `CONTEXTLY_WORKER=1` (§2).
 
 **5. Vercel**
 - Import the repo (Git integration, Next.js preset). Add env:
