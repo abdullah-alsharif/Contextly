@@ -51,6 +51,9 @@ services:
       # NVIDIA embeddings cap inputs at 512 tokens — 400 keeps chunks under it.
       - key: CHUNK_SIZE_TOKENS
         value: "400"
+      # Absorbs slow time-to-first-token on NVIDIA's free chat tier (docs/tuning.md).
+      - key: AI_TIMEOUT_SECONDS
+        value: "120"
       - key: DATABASE_URL
         sync: false
       - key: MIGRATION_DATABASE_URL

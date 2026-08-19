@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 
 from app.providers.ai.base import estimate_tokens
-from app.providers.ai.http import post_chat, post_embeddings
+from app.providers.ai.http import DEFAULT_TIMEOUT_SECONDS, post_chat, post_embeddings
 
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1/embeddings"
 DEFAULT_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
@@ -44,6 +44,7 @@ class NvidiaProvider:
         chat_model: str = DEFAULT_CHAT_MODEL,
         retries: int = 3,
         backoff_seconds: tuple[float, ...] = (1.0, 2.0, 4.0),
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.api_key = api_key
@@ -52,6 +53,7 @@ class NvidiaProvider:
         self.chat_model = chat_model
         self.retries = retries
         self.backoff_seconds = backoff_seconds
+        self.timeout_seconds = timeout_seconds
         self._transport = transport
 
     async def embed(
@@ -79,6 +81,7 @@ class NvidiaProvider:
                     extra_body={"input_type": input_type},
                     retries=self.retries,
                     backoff_seconds=self.backoff_seconds,
+                    timeout_seconds=self.timeout_seconds,
                     transport=self._transport,
                 )
             )
@@ -100,6 +103,7 @@ class NvidiaProvider:
             stream=stream,
             retries=self.retries,
             backoff_seconds=self.backoff_seconds,
+            timeout_seconds=self.timeout_seconds,
             transport=self._transport,
         )
 

@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 32
     ai_embed_retries: int = 3
     ai_embed_retry_backoff_seconds: str = "1,2,4"
+    # Per-request timeout for AI provider calls (docs/ai-providers.md §4).
+    # 120s absorbs slow time-to-first-token on NVIDIA's free chat tier (measured
+    # 38-40s during peak; docs/tuning.md) while still failing fast on dead
+    # connections.
+    ai_timeout_seconds: float = 120.0
     nvidia_api_key: str = ""
     nvidia_embeddings_url: str = "https://integrate.api.nvidia.com/v1/embeddings"
     nvidia_chat_url: str = "https://integrate.api.nvidia.com/v1/chat/completions"

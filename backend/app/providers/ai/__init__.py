@@ -44,6 +44,7 @@ def build_ai_provider(settings: Settings) -> AIProvider:
             chat_model=settings.nvidia_chat_model,
             retries=settings.ai_embed_retries,
             backoff_seconds=backoff,
+            timeout_seconds=settings.ai_timeout_seconds,
         )
     elif settings.ai_provider == "openrouter":
         provider = OpenRouterProvider(
@@ -53,6 +54,7 @@ def build_ai_provider(settings: Settings) -> AIProvider:
             chat_model=settings.openrouter_chat_model,
             retries=settings.ai_embed_retries,
             backoff_seconds=backoff,
+            timeout_seconds=settings.ai_timeout_seconds,
         )
     else:
         raise ValueError(
