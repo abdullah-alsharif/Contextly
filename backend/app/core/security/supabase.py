@@ -1,13 +1,14 @@
-"""Supabase-issued JWT verification (HS256 shared secret and/or RS256 JWKS).
+"""Supabase-issued JWT verification (HS256 shared secret and/or JWKS).
 
 Validates signature + expiry + issuer + audience per docs/security.md §1.
-RS256 keys come from the project JWKS endpoint via PyJWKClient, which caches
-the key set (default lifespan 300s) — no per-request network calls. For offline
-tests an injected key resolver is used instead (docs/testing.md §1).
+RS256/ES256 keys come from the project JWKS endpoint via PyJWKClient, which
+caches the key set (default lifespan 300s) — no per-request network calls. For
+offline tests an injected key resolver is used instead (docs/testing.md §1).
 
-Supabase projects may still issue legacy HS256 tokens alongside RS256 (key
+Supabase projects issue tokens in a mix of algorithms: legacy HS256 shared
+secret, RS256, and — for newer projects — ES256 via the JWKS endpoint (key
 migration state, research.md §2); the resolver inspects the token header and
-picks the right key: HS256 → shared secret, RS256 → JWKS by `kid`.
+picks the right key: HS256 → shared secret, RS256/ES256 → JWKS by `kid`.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ def _jwks_client(jwks_url: str) -> jwt.PyJWKClient:
 
 
 class _KeyResolver:
-    """Pick the verification key from the token header (HS256 vs RS256)."""
+    """Pick the verification key from the token header (HS256 vs RS256/ES256)."""
 
     def __init__(
         self,
@@ -47,9 +48,9 @@ class _KeyResolver:
             if not self._secret:
                 raise AuthError("HS256 token but no SUPABASE_JWT_SECRET configured")
             return self._secret
-        if alg == "RS256":
+        if alg in ("RS256", "ES256"):
             if self._client is None:
-                raise AuthError("RS256 token but no JWKS endpoint configured")
+                raise AuthError("RS256/ES256 token but no JWKS endpoint configured")
             return self._client.get_signing_key_from_jwt(token)
         raise AuthError(f"unsupported token algorithm: {alg!r}")
 
@@ -94,7 +95,7 @@ class SupabaseAuthenticator:
             claims = jwt.decode(
                 token,
                 key,
-                algorithms=["HS256", "RS256"],
+                algorithms=["HS256", "RS256", "ES256"],
                 audience=SUPABASE_AUDIENCE,
                 issuer=self._issuer,
                 leeway=self._leeway,

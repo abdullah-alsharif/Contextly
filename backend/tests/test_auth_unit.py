@@ -14,7 +14,7 @@ import uuid
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
 from app.core.config import Settings
 from app.core.security.base import AuthError
@@ -184,6 +184,110 @@ def _rs256_token(private_pem: str, *, expires_in_seconds: int = 3600) -> str:
         private_pem,
         algorithm="RS256",
     )
+
+
+# --- Supabase authenticator (ES256 via injected local JWKS) ----------------
+# Newer Supabase projects sign access tokens with ES256 (P-256) keys served by
+# the JWKS endpoint — same verification path as RS256 (supabase.py resolver).
+
+
+@pytest.fixture(scope="module")
+def ec_key() -> tuple[str, str]:
+    """Local EC P-256 keypair as (private PEM, public PEM); no network."""
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    return (
+        private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode(),
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode(),
+    )
+
+
+def _es256_token(private_pem: str, *, expires_in_seconds: int = 3600) -> str:
+    return jwt.encode(
+        {
+            "sub": str(SUB_A),
+            "aud": SUPABASE_AUDIENCE,
+            "iss": "https://xyz.supabase.co/auth/v1",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + expires_in_seconds,
+        },
+        private_pem,
+        algorithm="ES256",
+    )
+
+
+def test_supabase_es256_valid(ec_key: tuple[str, str]) -> None:
+    private_pem, public_pem = ec_key
+    auth = SupabaseAuthenticator(
+        issuer="https://xyz.supabase.co/auth/v1",
+        key_resolver=lambda token: public_pem,
+    )
+    assert auth.authenticate(_es256_token(private_pem)).user_id == SUB_A
+
+
+def test_supabase_es256_expired_rejected(ec_key: tuple[str, str]) -> None:
+    private_pem, public_pem = ec_key
+    auth = SupabaseAuthenticator(
+        issuer="https://xyz.supabase.co/auth/v1",
+        key_resolver=lambda token: public_pem,
+    )
+    with pytest.raises(AuthError):
+        auth.authenticate(_es256_token(private_pem, expires_in_seconds=-3600))
+
+
+def test_supabase_es256_wrong_signature_rejected(ec_key: tuple[str, str]) -> None:
+    _private_pem, public_pem = ec_key
+    other = ec.generate_private_key(ec.SECP256R1())
+    other_pem = other.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode()
+    auth = SupabaseAuthenticator(
+        issuer="https://xyz.supabase.co/auth/v1",
+        key_resolver=lambda token: public_pem,
+    )
+    with pytest.raises(AuthError):
+        auth.authenticate(_es256_token(other_pem))
+
+
+def test_supabase_es256_wrong_issuer_rejected(ec_key: tuple[str, str]) -> None:
+    private_pem, public_pem = ec_key
+    auth = SupabaseAuthenticator(
+        issuer="https://other.supabase.co/auth/v1",
+        key_resolver=lambda token: public_pem,
+    )
+    with pytest.raises(AuthError):
+        auth.authenticate(_es256_token(private_pem))
+
+
+def test_supabase_es256_wrong_audience_rejected(ec_key: tuple[str, str]) -> None:
+    private_pem, public_pem = ec_key
+    auth = SupabaseAuthenticator(
+        issuer="https://xyz.supabase.co/auth/v1",
+        key_resolver=lambda token: public_pem,
+    )
+    token = jwt.encode(
+        {
+            "sub": str(SUB_A),
+            "aud": "someone_else",
+            "iss": "https://xyz.supabase.co/auth/v1",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+        },
+        private_pem,
+        algorithm="ES256",
+    )
+    with pytest.raises(AuthError):
+        auth.authenticate(token)
 
 
 def test_supabase_rs256_valid(rsa_pem: tuple[str, str]) -> None:

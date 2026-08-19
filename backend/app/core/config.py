@@ -157,12 +157,12 @@ class Settings(BaseSettings):
             if not self.supabase_jwt_secret and not jwks:
                 raise RuntimeError(
                     "AUTH_MODE=supabase requires SUPABASE_JWT_SECRET (HS256) "
-                    "or SUPABASE_URL/SUPABASE_JWKS_URL (RS256)"
+                    "or SUPABASE_URL/SUPABASE_JWKS_URL (RS256/ES256)"
                 )
 
     @property
     def supabase_jwks_url_resolved(self) -> str:
-        """JWKS endpoint for RS256 verification; empty when unavailable."""
+        """JWKS endpoint for RS256/ES256 verification; empty when unavailable."""
         if self.supabase_jwks_url:
             return self.supabase_jwks_url
         if self.supabase_url:
