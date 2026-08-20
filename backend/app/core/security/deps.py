@@ -1,6 +1,6 @@
-"""Shared `get_current_user` dependency guarding every /api/v1 business route.
+"""Shared auth dependencies guarding /api/v1 business routes.
 
-Flow (contracts/auth.md §1, §4):
+`get_current_user` (contracts/auth.md §1, §4):
 1. Parse `Authorization: Bearer <JWT>`.
 2. Verify with the mode-selected authenticator (dev or Supabase).
 3. Any failure → 401 (never 200).
@@ -9,16 +9,27 @@ Flow (contracts/auth.md §1, §4):
    in the request runs under RLS (docs/multi-tenancy.md §2) — the app never
    bypasses the database boundary.
 5. Bootstrap the user's `profiles` row if missing (docs/security.md §1).
+
+`get_current_user_streaming` — the same 1-3, for routes that return a STREAMED
+response body (SSE chat send, document download). FastAPI keeps yield-
+dependency sessions open until the response body finishes, so a request
+session would stay in an open transaction for the whole stream and its
+profiles UPSERT would hold a row lock that blocks every concurrent request
+(docs/chat.md §4). This variant never opens a request-scoped session — the
+bootstrap runs on a short-lived session that COMMITS immediately, so the
+stream holds zero DB connections. Routes that still query a `db` session
+(document download) apply the RLS role/claim explicitly via
+`apply_identity_to_session`.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.core.security.base import AuthError, Authenticator
@@ -93,5 +104,40 @@ async def get_current_user(
 
     # Bootstrap the profile row on first sight (docs/security.md §1).
     await ensure_profile(db, identity)
+
+    yield identity
+
+
+async def get_current_user_streaming(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    settings: Settings = Depends(get_settings),
+) -> AsyncIterator[Identity]:
+    """Streaming-route auth: resolve identity WITHOUT a request-scoped session.
+
+    FastAPI keeps yield-dependency sessions open until the response body
+    finishes, so for StreamingResponse routes a request session would pin the
+    profiles UPSERT's row locks for the whole stream and block every
+    concurrent request (docs/chat.md §4). This variant never opens a request
+    session: the profile bootstrap (docs/security.md §1) runs on a short-lived
+    session from the app's session factory and COMMITS immediately.
+    """
+    if (
+        credentials is None
+        or credentials.scheme.lower() != "bearer"
+        or not credentials.credentials
+    ):
+        raise _unauthorized("missing bearer token")
+
+    try:
+        identity = build_authenticator(settings).authenticate(credentials.credentials)
+    except AuthError as exc:
+        raise _unauthorized(str(exc)) from exc
+
+    session_factory: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    async with session_factory() as db:
+        await apply_identity_to_session(db, identity)
+        await ensure_profile(db, identity)
+        await db.commit()
 
     yield identity

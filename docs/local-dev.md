@@ -59,6 +59,8 @@ services:
       POSTGRES_USER: contextly
       POSTGRES_PASSWORD: contextly
       POSTGRES_DB: contextly
+    volumes:
+      - db-data:/var/lib/postgresql/data   # survives `docker compose down`
     ports: ["5432:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U contextly"]
@@ -99,6 +101,7 @@ services:
 
 volumes:
   storage-data:
+  db-data:
 ```
 
 **Dev auth mode:** `AUTH_MODE=dev` issues a dev JWT (any user id) so the whole stack

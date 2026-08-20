@@ -11,7 +11,9 @@ failing-stream provider (docs/chat.md §6).
 
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -278,6 +280,79 @@ def test_send_streams_meta_deltas_done(client: TestClient, seeded: None) -> None
     assert "What is the refund period?" in full  # fake canned answer echoes question
     done = events[-1][1]
     assert done["sources"], "hits were expected: the doc has one embedded chunk"
+
+
+def test_send_stream_holds_no_db_connection_while_streaming(
+    seeded: None, tmp_path
+) -> None:
+    """Regression: the send route must not hold a pooled connection mid-stream.
+
+    A request-scoped session (profiles upsert) would pin a pooled connection —
+    and its row locks — for the whole stream (docs/chat.md §4). A size-1 pool
+    makes the hold observable: while deltas flow, nothing may be checked out.
+    """
+    engine = create_async_engine(
+        os.environ["DATABASE_URL"].replace(
+            "postgresql://", "postgresql+asyncpg://", 1
+        ),
+        pool_size=1,
+        max_overflow=0,
+    )
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    class SlowProvider(FakeProvider):
+        supports_streaming = True
+
+        async def generate(
+            self, messages: list[dict], *, stream: bool = False
+        ) -> str | AsyncIterator[str]:
+            async def _deltas() -> AsyncIterator[str]:
+                yield "api-level first"
+                await asyncio.sleep(0.1)
+                yield " second"
+
+            return _deltas()
+
+    async def get_test_db():
+        async with factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except BaseException:
+                await session.rollback()
+                raise
+
+    settings = Settings(
+        database_url=os.environ["DATABASE_URL"],
+        auth_mode="dev",
+        app_env="dev",
+        dev_jwt_secret=DEV_SECRET,
+        storage_provider="local",
+        local_storage_dir=str(tmp_path),
+        rate_limit_chat_per_minute=1000,
+    )
+    app = create_app(
+        settings=settings,
+        ai_provider=SlowProvider(embedding_dims=1024),
+        session_factory=factory,
+    )
+    app.dependency_overrides[get_db] = get_test_db
+    with TestClient(app) as client:
+        token = _token(USER_A)
+        with client.stream(
+            "POST",
+            f"/api/v1/conversations/{_CONV_A}/messages",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"content": "hold a connection?"},
+        ) as response:
+            assert response.status_code == 200
+            got = b""
+            for chunk in response.iter_bytes():
+                got += chunk
+                if b"api-level first" in got:
+                    break
+            time.sleep(0.05)  # the generator is mid-stream (0.1s between deltas)
+            assert engine.pool.checkedout() == 0
 
 
 def test_send_without_retrievable_chunks_returns_canned_answer(

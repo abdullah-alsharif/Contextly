@@ -70,6 +70,16 @@ sequenceDiagram
 
 - The client connects to an SSE endpoint; the backend accumulates the final text and
   persists it exactly once at stream end (idempotent: message id in the stream header).
+- The backend never holds a pooled DB connection — and never holds a lock —
+  while the provider stream is running: the send route uses
+  `get_current_user_streaming` (no request-scoped session; the profiles
+  bootstrap commits on a short-lived session before the response starts), and
+  the assistant message is persisted on a short-lived session opened only at
+  stream end. If a request session stayed open until the SSE body finished,
+  FastAPI's yield-dependency teardown would pin the profiles UPSERT's row
+  locks (and one pooled connection) for the whole stream, blocking every
+  concurrent request until it ends. Document downloads use the same auth
+  dependency, so their streams hold no row locks either.
 - Client shows the assistant message optimistically, marked "…" until `done`.
 - Token counts + timings stored on the assistant message for logs/metrics.
 

@@ -9,6 +9,7 @@ the no-qualifying-chunks path (docs/rag.md §7).
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 
@@ -354,6 +355,65 @@ async def test_non_streaming_provider_yields_single_delta():
     assert len(deltas) == 1
     assert deltas[0].data["text"].startswith('Answer for "Non-streaming question":')
     assert events[-1].event == "done"
+
+
+@pytest.mark.anyio
+async def test_stream_holds_no_db_connection_while_generating():
+    """Regression: the provider stream must not hold a pooled connection.
+
+    Persistence runs on a short-lived session opened only at stream end — a
+    connection held per stream would exhaust the pool and block every other
+    request. A size-1 pool makes the hold observable: while deltas flow,
+    nothing may be checked out.
+    """
+    engine = create_async_engine(
+        _SETTINGS.database_url.replace("postgresql://", "postgresql+asyncpg://", 1),
+        pool_size=1,
+        max_overflow=0,
+    )
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        class SlowProvider(FakeProvider):
+            async def generate(self, messages, *, stream=False):
+                async def _deltas():
+                    yield "first"
+                    await asyncio.sleep(0.1)
+                    yield " second"
+
+                return _deltas()
+
+        provider = SlowProvider(embedding_dims=1024)
+        in_flight = InFlightRegistry()
+        prepared = await prepare_chat(
+            factory,
+            provider,
+            _SETTINGS,
+            identity=IDENTITY,
+            conversation_id=SVC_CONV,
+            question="connection-hold question",
+            idempotency_key=None,
+            in_flight=in_flight,
+        )
+
+        events = []
+        checked_out_during_stream = []
+        async for event in stream_chat_events(
+            factory,
+            provider,
+            prepared=prepared,
+            settings=_SETTINGS,
+            in_flight=in_flight,
+        ):
+            if event.event == "delta":
+                # Suspended at the yield: mid-stream.
+                checked_out_during_stream.append(engine.pool.checkedout())
+            events.append(event)
+
+        assert checked_out_during_stream, "expected at least one delta"
+        assert all(n == 0 for n in checked_out_during_stream)
+        assert events[-1].event == "done"
+    finally:
+        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------

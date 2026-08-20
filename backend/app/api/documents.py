@@ -1,9 +1,13 @@
 """Documents router: POST/GET/GET{id}/DELETE /documents (docs/api.md §2).
 
-Every endpoint is guarded by the router-level get_current_user dependency, so
-unauthenticated requests get 401 by construction (contracts/auth.md §1). Error
-mapping: 400 invalid upload, 413 oversized, 404 not owned/nonexistent/deleted,
-502 upstream storage failure (docs/api.md §2, §6).
+Every endpoint resolves the caller via a get_current_user dependency, so
+unauthenticated requests get 401 by construction (contracts/auth.md §1); the
+general rate limit applies per route (docs/security.md §5). The download
+endpoint uses `get_current_user_streaming` + an explicit `apply_identity_to_session`
+on its own session: a request session would keep its profiles upsert locked
+for the whole download stream (docs/chat.md §4). Error mapping: 400 invalid
+upload, 413 oversized, 404 not owned/nonexistent/deleted, 502 upstream
+storage failure (docs/api.md §2, §6).
 """
 
 from __future__ import annotations
@@ -17,9 +21,16 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import enforce_general_rate_limit
+from app.api.dependencies import (
+    enforce_general_rate_limit,
+    enforce_general_rate_limit_streaming,
+)
 from app.core.config import Settings, get_settings
-from app.core.security.deps import get_current_user
+from app.core.security.deps import (
+    apply_identity_to_session,
+    get_current_user,
+    get_current_user_streaming,
+)
 from app.core.security.identity import Identity
 from app.db.session import get_db
 from app.providers.storage.base import StorageProvider
@@ -49,7 +60,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/documents",
     tags=["documents"],
-    dependencies=[Depends(get_current_user), Depends(enforce_general_rate_limit)],
 )
 
 
@@ -73,7 +83,7 @@ async def _read_upload(file: UploadFile, settings: Settings) -> bytes:
     return b"".join(chunks)
 
 
-@router.post("", response_model=DocumentOut, status_code=201)
+@router.post("", response_model=DocumentOut, status_code=201, dependencies=[Depends(enforce_general_rate_limit)])
 async def upload_document(
     file: UploadFile = File(...),
     replace: bool = False,
@@ -118,7 +128,7 @@ async def upload_document(
         ) from exc
 
 
-@router.get("", response_model=list[DocumentOut])
+@router.get("", response_model=list[DocumentOut], dependencies=[Depends(enforce_general_rate_limit)])
 async def get_documents(
     status: Literal[
         "uploaded", "processing", "ready", "failed", "deleted", "superseded", "cancelled"
@@ -131,7 +141,7 @@ async def get_documents(
     return await list_documents(db, identity, status=status)
 
 
-@router.get("/{document_id}", response_model=DocumentOut)
+@router.get("/{document_id}", response_model=DocumentOut, dependencies=[Depends(enforce_general_rate_limit)])
 async def get_document_detail(
     document_id: uuid.UUID,
     identity: Identity = Depends(get_current_user),
@@ -144,7 +154,11 @@ async def get_document_detail(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/{document_id}/download-url", response_model=DownloadUrlOut)
+@router.get(
+    "/{document_id}/download-url",
+    response_model=DownloadUrlOut,
+    dependencies=[Depends(enforce_general_rate_limit)],
+)
 async def get_download_url(
     document_id: uuid.UUID,
     identity: Identity = Depends(get_current_user),
@@ -176,10 +190,13 @@ async def get_download_url(
     return {"url": url, "expires_at": expires_at}
 
 
-@router.get("/{document_id}/download")
+@router.get(
+    "/{document_id}/download",
+    dependencies=[Depends(enforce_general_rate_limit_streaming)],
+)
 async def download_document_bytes(
     document_id: uuid.UUID,
-    identity: Identity = Depends(get_current_user),
+    identity: Identity = Depends(get_current_user_streaming),
     db: AsyncSession = Depends(get_db),
     storage: StorageProvider = Depends(get_storage_provider),
 ) -> StreamingResponse:
@@ -190,6 +207,9 @@ async def download_document_bytes(
     depending on browser-navigable signed URLs (a local file:// URI can't be
     opened from an http:// page). Owner-only 404, storage failure 502.
     """
+    # RLS for this session: streaming auth holds no request session
+    # (docs/chat.md §4), so the role + claim are applied here.
+    await apply_identity_to_session(db, identity)
     try:
         filename, data = await download_document(db, storage, identity, document_id)
     except DocumentNotFoundError as exc:
@@ -206,7 +226,7 @@ async def download_document_bytes(
     )
 
 
-@router.delete("/{document_id}", status_code=204)
+@router.delete("/{document_id}", status_code=204, dependencies=[Depends(enforce_general_rate_limit)])
 async def remove_document(
     document_id: uuid.UUID,
     identity: Identity = Depends(get_current_user),
@@ -220,7 +240,7 @@ async def remove_document(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/{document_id}/cancel", status_code=204)
+@router.post("/{document_id}/cancel", status_code=204, dependencies=[Depends(enforce_general_rate_limit)])
 async def cancel_document_endpoint(
     document_id: uuid.UUID,
     identity: Identity = Depends(get_current_user),
@@ -236,7 +256,11 @@ async def cancel_document_endpoint(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.patch("/{document_id}/reprocess", response_model=DocumentOut)
+@router.patch(
+    "/{document_id}/reprocess",
+    response_model=DocumentOut,
+    dependencies=[Depends(enforce_general_rate_limit)],
+)
 async def reprocess_document_endpoint(
     document_id: uuid.UUID,
     identity: Identity = Depends(get_current_user),

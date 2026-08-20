@@ -2,9 +2,10 @@
 
 docs/security.md §1 ("Profiles bootstrap: on first /auth/me, create profiles
 row if missing (upsert)"). Idempotent and race-safe via PK ON CONFLICT.
-Runs inside the request's RLS session (role + claim already set by
-get_current_user), so the profiles_user_isolation policy passes
-(docs/multi-tenancy.md §2).
+Runs on a session with the RLS role + claim already set, so the
+profiles_user_isolation policy passes (docs/multi-tenancy.md §2); streaming
+routes commit immediately so the upsert's row locks never survive into a
+streamed response (docs/chat.md §4).
 """
 
 from __future__ import annotations

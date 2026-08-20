@@ -107,7 +107,7 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> TestClient:
                 await session.rollback()
                 raise
 
-    app = create_app(settings=settings)
+    app = create_app(settings=settings, session_factory=_TestSessionFactory)
     app.dependency_overrides[get_db] = get_test_db
     with TestClient(app) as test_client:
         yield test_client

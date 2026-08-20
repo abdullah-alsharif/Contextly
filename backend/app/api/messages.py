@@ -1,9 +1,11 @@
 """Messages router: message history + streaming send (docs/api.md §4).
 
-Every endpoint is guarded by the router-level get_current_user dependency, so
-unauthenticated requests get 401 by construction (contracts/auth.md §1). Both
-the send and history paths carry the per-user chat rate limit (docs/security.md
-§5, contracts/chat.md §4).
+Every endpoint resolves the caller via a get_current_user dependency, so
+unauthenticated requests get 401 by construction (contracts/auth.md §1). The
+send path uses `get_current_user_streaming` (no request-scoped DB session):
+a request session would keep its profiles upsert locked for the whole stream
+(docs/chat.md §4). Both send and history carry the per-user chat rate limit
+(docs/security.md §5, contracts/chat.md §4).
 
 Error mapping (contracts/chat.md §4): 404 unowned/missing/deleted conversation,
 400 conversation with no selected documents (docs/chat.md §6), 409 idempotency
@@ -34,10 +36,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api.dependencies import (
     InFlightRegistry,
     enforce_chat_rate_limit,
+    enforce_chat_rate_limit_streaming,
     get_in_flight_registry,
 )
 from app.core.config import Settings, get_settings
-from app.core.security.deps import get_current_user
+from app.core.security.deps import get_current_user, get_current_user_streaming
 from app.core.security.identity import Identity
 from app.db.session import get_db
 from app.providers.ai.base import AIProvider
@@ -60,7 +63,6 @@ _DEFAULT_PAGE_SIZE = get_settings().history_page_size
 router = APIRouter(
     prefix="/conversations",
     tags=["chat"],
-    dependencies=[Depends(get_current_user)],
 )
 
 
@@ -131,13 +133,13 @@ async def get_history(
 
 @router.post(
     "/{conversation_id}/messages",
-    dependencies=[Depends(enforce_chat_rate_limit)],
+    dependencies=[Depends(enforce_chat_rate_limit_streaming)],
 )
 async def send_message(
     conversation_id: uuid.UUID,
     body: MessageSendIn,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-    identity: Identity = Depends(get_current_user),
+    identity: Identity = Depends(get_current_user_streaming),
     settings: Settings = Depends(get_app_settings),
     ai: AIProvider = Depends(get_ai_provider),
     in_flight: InFlightRegistry = Depends(get_in_flight_registry),

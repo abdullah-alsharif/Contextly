@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from fastapi import Depends, HTTPException, Request
 
-from app.core.security.deps import get_current_user
+from app.core.security.deps import get_current_user, get_current_user_streaming
 from app.core.security.identity import Identity
 
 WINDOW_SECONDS = 60.0
@@ -150,6 +150,16 @@ async def enforce_chat_rate_limit(
     )
 
 
+async def enforce_chat_rate_limit_streaming(
+    identity: Identity = Depends(get_current_user_streaming),
+    limiter: SlidingWindowRateLimiter = Depends(get_chat_rate_limiter),
+) -> None:
+    """Chat rate limit for streaming routes (see `get_current_user_streaming`)."""
+    _raise_if_rate_limited(
+        limiter.check(str(identity.user_id)), "chat rate limit exceeded, retry later"
+    )
+
+
 def get_general_rate_limiter(request: Request) -> SlidingWindowRateLimiter:
     """The app-scoped general rate limiter (injectable in tests via create_app)."""
     limiter: SlidingWindowRateLimiter = request.app.state.general_rate_limiter
@@ -166,6 +176,16 @@ async def enforce_general_rate_limit(
     on every non-chat /api/v1 router (spec D1) so chat and general buckets are
     independent.
     """
+    _raise_if_rate_limited(
+        limiter.check(str(identity.user_id)), "rate limit exceeded, retry later"
+    )
+
+
+async def enforce_general_rate_limit_streaming(
+    identity: Identity = Depends(get_current_user_streaming),
+    limiter: SlidingWindowRateLimiter = Depends(get_general_rate_limiter),
+) -> None:
+    """General rate limit for streaming routes (see `get_current_user_streaming`)."""
     _raise_if_rate_limited(
         limiter.check(str(identity.user_id)), "rate limit exceeded, retry later"
     )

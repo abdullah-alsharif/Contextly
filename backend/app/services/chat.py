@@ -11,13 +11,14 @@ the SSE stream starts:
    selection, persist the user message (idempotency-deduped), embed the
    question, retrieve top-K hits, then COMMIT — a client disconnect mid-stream
    never loses the exchange (contracts/chat.md §3).
-2. `stream_chat_events` — on its OWN session: build the untrusted-excerpt
-   prompt, generate (streaming when supported), persist the assistant message
-   exactly once with sources + metrics, auto-rename the default title, COMMIT.
-
-Each phase re-applies the RLS role + claim (docs/multi-tenancy.md §2). A
-mid-stream provider failure persists the partial answer with status='error'
-so the UI can offer a retry (docs/chat.md §6, docs/rag.md §7).
+2. `stream_chat_events` — build the untrusted-excerpt prompt, generate
+   (streaming when supported), then persist the assistant message on a
+   short-lived session opened only at stream end: the LLM stream must never
+   hold a pooled DB connection, or a few concurrent chats exhaust the pool
+   (docs/chat.md §4). Each phase re-applies the RLS role + claim
+   (docs/multi-tenancy.md §2). A mid-stream provider failure persists the
+   partial answer with status='error' so the UI can offer a retry
+   (docs/chat.md §6, docs/rag.md §7).
 """
 
 from __future__ import annotations
@@ -383,173 +384,157 @@ async def stream_chat_events(
 ) -> Any:
     """Yield SSE events for one answer; persist the assistant message once.
 
-    Commits at stream end with the assistant message + sources + metrics
-    (docs/chat.md §4). A mid-stream provider failure persists the partial text
-    with status='error' and yields a terminal error event (docs/chat.md §6,
+    Persistence runs on a short-lived session opened only at stream end
+    (docs/chat.md §4) — the provider stream never holds a pooled connection.
+    A mid-stream provider failure persists the partial text with
+    status='error' and yields a terminal error event (docs/chat.md §6,
     docs/rag.md §7); an unexpected non-provider failure yields a terminal
-    error event and persists nothing. The idempotency key is released when the
-    stream ends.
+    error event and persists nothing. The idempotency key is released when
+    the stream ends.
     """
     yield ChatEvent("meta", {"message_id": str(prepared.user_message_id)})
 
     try:
-        async with session_factory() as db:
-            await apply_identity_to_session(db, Identity(user_id=prepared.user_id))
-
-            if prepared.replay is not None:
-                assistant_id, content, sources = prepared.replay
-                yield ChatEvent("delta", {"text": content})
-                yield ChatEvent(
-                    "done",
-                    {"id": str(assistant_id), "sources": sources, "llm_ms": 0},
-                )
-                return
-
-            if not prepared.hits:
-                # docs/rag.md §7: no qualifying chunks → do not call the LLM.
-                yield ChatEvent("delta", {"text": _NO_RELEVANT_ANSWER})
-                assistant_id = await _persist_answer(
-                    db,
-                    prepared,
-                    content=_NO_RELEVANT_ANSWER,
-                    sources=[],
-                    status="done",
-                    input_tokens=0,
-                    output_tokens=estimate_tokens(_NO_RELEVANT_ANSWER),
-                    retrieval_ms=prepared.retrieval_ms,
-                    llm_ms=0.0,
-                )
-                await _maybe_auto_rename(db, prepared, settings)
-                await touch_conversation(
-                    db,
-                    Identity(user_id=prepared.user_id),
-                    prepared.conversation_id,
-                )
-                await db.commit()
-                yield ChatEvent(
-                    "done",
-                    {"id": str(assistant_id), "sources": [], "llm_ms": 0},
-                )
-                return
-
-            prompt = build_prompt_messages(
-                prepared.question,
-                prepared.hits,
-                history=prepared.context_window,
+        if prepared.replay is not None:
+            # Replay: the stored answer needs no session.
+            assistant_id, content, sources = prepared.replay
+            yield ChatEvent("delta", {"text": content})
+            yield ChatEvent(
+                "done",
+                {"id": str(assistant_id), "sources": sources, "llm_ms": 0},
             )
-            input_tokens = estimate_tokens(
-                prompt[0]["content"] + "\n" + prompt[1]["content"]
-            )
+            return
 
-            started = perf_counter()
-            sources = _sources_from_hits(prepared.hits)
+        if not prepared.hits:
+            # docs/rag.md §7: no qualifying chunks -> skip the LLM.
+            assistant_id = await _persist_answer_on_own_session(
+                session_factory,
+                prepared,
+                settings=settings,
+                content=_NO_RELEVANT_ANSWER,
+                sources=[],
+                status="done",
+                input_tokens=0,
+                output_tokens=estimate_tokens(_NO_RELEVANT_ANSWER),
+                retrieval_ms=prepared.retrieval_ms,
+                llm_ms=0.0,
+            )
+            yield ChatEvent("delta", {"text": _NO_RELEVANT_ANSWER})
+            yield ChatEvent(
+                "done",
+                {"id": str(assistant_id), "sources": [], "llm_ms": 0},
+            )
+            return
+
+        prompt = build_prompt_messages(
+            prepared.question,
+            prepared.hits,
+            history=prepared.context_window,
+        )
+        input_tokens = estimate_tokens(
+            prompt[0]["content"] + "\n" + prompt[1]["content"]
+        )
+
+        started = perf_counter()
+        sources = _sources_from_hits(prepared.hits)
+        try:
+            stream = await ai.generate(prompt, stream=ai.supports_streaming)
+        except AIProviderError as exc:
+            logger.error(
+                "chat generation failed for user %s: %s",
+                prepared.conversation_id,
+                exc,
+            )
+            yield ChatEvent(
+                "error", {"message": "the AI provider failed; try again"}
+            )
+            return
+
+        partial: list[str] = []
+
+        # Inject a [1] citation marker for dev/CI (FakeProvider has none).
+        def _annotate_answer(text: str) -> str:
+            if not sources:
+                return text
+            if "[" in text and "]" in text:
+                return text
+            return f"{text}\n\n[1]"
+
+        if ai.supports_streaming:
+            if not isinstance(stream, AsyncIterator):
+                raise AIProviderError(
+                    "provider did not return a stream while streaming is enabled",
+                    provider="unknown",
+                )
             try:
-                stream = await ai.generate(prompt, stream=ai.supports_streaming)
+                async for delta in stream:
+                    partial.append(delta)
+                    yield ChatEvent("delta", {"text": delta})
             except AIProviderError as exc:
                 logger.error(
-                    "chat generation failed for user %s: %s",
+                    "chat stream failed for user %s: %s",
                     prepared.conversation_id,
                     exc,
                 )
+                content = "".join(partial)
+                if content:
+                    # Persist the partial so the UI can offer a retry
+                    # (docs/chat.md §6, docs/rag.md §7).
+                    await _persist_answer_on_own_session(
+                        session_factory,
+                        prepared,
+                        settings=settings,
+                        content=content,
+                        sources=sources,
+                        status="error",
+                        input_tokens=input_tokens,
+                        output_tokens=estimate_tokens(content),
+                        retrieval_ms=prepared.retrieval_ms,
+                        llm_ms=(perf_counter() - started) * 1000,
+                    )
                 yield ChatEvent(
-                    "error", {"message": "the AI provider failed; try again"}
+                    "error",
+                    {"message": "the AI provider failed mid-stream; retry"},
                 )
                 return
+            content = "".join(partial)
+            annotated = _annotate_answer(content)
+            if annotated != content:
+                content = annotated
+                yield ChatEvent("delta", {"text": annotated[len("".join(partial)):]})
+            llm_ms = (perf_counter() - started) * 1000
+        else:
+            if not isinstance(stream, str):
+                raise AIProviderError(
+                    "non-streaming provider returned a stream result",
+                    provider="unknown",
+                )
+            content = _annotate_answer(stream)
+            llm_ms = (perf_counter() - started) * 1000
+            yield ChatEvent("delta", {"text": content})
 
-            partial: list[str] = []
-
-            # FakeProvider's canned answer has no [n] markers, but dev/CI need
-            # visible citations; inject one [1] delta when sources exist.
-            def _annotate_answer(text: str) -> str:
-                if not sources:
-                    return text
-                if "[" in text and "]" in text:
-                    return text
-                return f"{text}\n\n[1]"
-
-            if ai.supports_streaming:
-                if not isinstance(stream, AsyncIterator):
-                    raise AIProviderError(
-                        "provider did not return a stream while streaming is enabled",
-                        provider="unknown",
-                    )
-                try:
-                    async for delta in stream:
-                        partial.append(delta)
-                        yield ChatEvent("delta", {"text": delta})
-                except AIProviderError as exc:
-                    logger.error(
-                        "chat stream failed for user %s: %s",
-                        prepared.conversation_id,
-                        exc,
-                    )
-                    content = "".join(partial)
-                    if content:
-                        # Persist the partial answer so the UI can offer a
-                        # retry (docs/chat.md §6, docs/rag.md §7).
-                        await _persist_answer(
-                            db,
-                            prepared,
-                            content=content,
-                            sources=sources,
-                            status="error",
-                            input_tokens=input_tokens,
-                            output_tokens=estimate_tokens(content),
-                            retrieval_ms=prepared.retrieval_ms,
-                            llm_ms=(perf_counter() - started) * 1000,
-                        )
-                        await db.commit()
-                    yield ChatEvent(
-                        "error",
-                        {"message": "the AI provider failed mid-stream; retry"},
-                    )
-                    return
-                content = "".join(partial)
-                annotated = _annotate_answer(content)
-                if annotated != content:
-                    content = annotated
-                    yield ChatEvent("delta", {"text": annotated[len("".join(partial)):]})
-                llm_ms = (perf_counter() - started) * 1000
-            else:
-                if not isinstance(stream, str):
-                    raise AIProviderError(
-                        "non-streaming provider returned a stream result",
-                        provider="unknown",
-                    )
-                content = _annotate_answer(stream)
-                llm_ms = (perf_counter() - started) * 1000
-                yield ChatEvent("delta", {"text": content})
-
-            assistant_id = await _persist_answer(
-                db,
-                prepared,
-                content=content,
-                sources=sources,
-                status="done",
-                input_tokens=input_tokens,
-                output_tokens=estimate_tokens(content),
-                retrieval_ms=prepared.retrieval_ms,
-                llm_ms=llm_ms,
-            )
-            await _maybe_auto_rename(db, prepared, settings)
-            await touch_conversation(
-                db,
-                Identity(user_id=prepared.user_id),
-                prepared.conversation_id,
-            )
-            await db.commit()
-            yield ChatEvent(
-                "done",
-                {
-                    "id": str(assistant_id),
-                    "sources": sources,
-                    "llm_ms": round(llm_ms),
-                },
-            )
+        assistant_id = await _persist_answer_on_own_session(
+            session_factory,
+            prepared,
+            settings=settings,
+            content=content,
+            sources=sources,
+            status="done",
+            input_tokens=input_tokens,
+            output_tokens=estimate_tokens(content),
+            retrieval_ms=prepared.retrieval_ms,
+            llm_ms=llm_ms,
+        )
+        yield ChatEvent(
+            "done",
+            {
+                "id": str(assistant_id),
+                "sources": sources,
+                "llm_ms": round(llm_ms),
+            },
+        )
     except Exception as exc:
-        # Unexpected (non-provider) failure: terminate with an explicit error
-        # event — nothing was persisted, so a retry re-runs the pipeline
-        # (docs/chat.md §6).
+        # Non-provider failure: terminate; nothing was persisted (docs/chat.md §6).
         logger.exception(
             "chat stream failed unexpectedly for conversation %s: %s",
             prepared.conversation_id,
@@ -561,6 +546,51 @@ async def stream_chat_events(
     finally:
         if in_flight is not None and prepared.idempotency_key is not None:
             in_flight.clear(str(prepared.conversation_id), prepared.idempotency_key)
+
+
+async def _persist_answer_on_own_session(
+    session_factory: async_sessionmaker[AsyncSession],
+    prepared: PreparedChat,
+    *,
+    settings: Settings,
+    content: str,
+    sources: list[dict[str, Any]],
+    status: str,
+    input_tokens: int,
+    output_tokens: int,
+    retrieval_ms: float,
+    llm_ms: float,
+) -> uuid.UUID:
+    """Persist the assistant message on a short-lived session (RLS-scoped).
+
+    Opens its own session so `stream_chat_events` never holds a pooled
+    connection while the provider is generating (docs/chat.md §4). For
+    completed answers (status='done') also auto-renames the default title and
+    touches the conversation; a mid-stream failure only persists the partial
+    row (status='error').
+    """
+    async with session_factory() as db:
+        await apply_identity_to_session(db, Identity(user_id=prepared.user_id))
+        assistant_id = await _persist_answer(
+            db,
+            prepared,
+            content=content,
+            sources=sources,
+            status=status,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            retrieval_ms=retrieval_ms,
+            llm_ms=llm_ms,
+        )
+        if status == "done":
+            await _maybe_auto_rename(db, prepared, settings)
+            await touch_conversation(
+                db,
+                Identity(user_id=prepared.user_id),
+                prepared.conversation_id,
+            )
+        await db.commit()
+        return assistant_id
 
 
 async def _persist_answer(

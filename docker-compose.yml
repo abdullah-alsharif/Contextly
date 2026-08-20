@@ -29,8 +29,10 @@ x-backend-env: &backend-env
   AI_EMBED_RETRY_BACKOFF_SECONDS: ${AI_EMBED_RETRY_BACKOFF_SECONDS:-1,2,4}
   NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
   NVIDIA_EMBEDDINGS_URL: ${NVIDIA_EMBEDDINGS_URL:-https://integrate.api.nvidia.com/v1/embeddings}
+  NVIDIA_CHAT_URL: ${NVIDIA_CHAT_URL:-https://integrate.api.nvidia.com/v1/chat/completions}
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
   OPENROUTER_EMBEDDINGS_URL: ${OPENROUTER_EMBEDDINGS_URL:-https://openrouter.ai/api/v1/embeddings}
+  OPENROUTER_CHAT_URL: ${OPENROUTER_CHAT_URL:-https://openrouter.ai/api/v1/chat/completions}
   RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-6}
   RETRIEVAL_EF_SEARCH: ${RETRIEVAL_EF_SEARCH:-40}
   RAG_QUERY_MAX_CHARS: ${RAG_QUERY_MAX_CHARS:-4000}
@@ -42,6 +44,8 @@ services:
       POSTGRES_USER: contextly
       POSTGRES_PASSWORD: contextly
       POSTGRES_DB: contextly
+    volumes:
+      - db-data:/var/lib/postgresql/data
     ports: ["5432:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U contextly"]
@@ -94,3 +98,4 @@ services:
 
 volumes:
   storage-data:
+  db-data:
