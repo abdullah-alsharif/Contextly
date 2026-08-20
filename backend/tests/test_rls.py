@@ -20,6 +20,7 @@ TABLES = (
     "conversations",
     "conversation_documents",
     "messages",
+    "action_logs",
 )
 
 RUNTIME_ROLE = "contextly_app"
@@ -54,6 +55,8 @@ class FixtureRows:
         self.conv_b = uuid.uuid4()
         self.message_a = uuid.uuid4()
         self.message_b = uuid.uuid4()
+        self.log_a = uuid.uuid4()
+        self.log_b = uuid.uuid4()
 
 
 @pytest.fixture(scope="module")
@@ -112,6 +115,15 @@ def rows() -> FixtureRows:
                         "values (%s, %s, 'user', %s)",
                         (message, conv, f"message for {conv}"),
                     )
+                for log, user, doc in (
+                    (data.log_a, data.user_a, data.doc_a),
+                    (data.log_b, data.user_b, data.doc_b),
+                ):
+                    cur.execute(
+                        "insert into action_logs (id, user_id, action_type, "
+                        "document_id, filename) values (%s, %s, 'upload', %s, %s)",
+                        (log, user, doc, f"log for {doc}"),
+                    )
             conn.commit()
         except Exception:
             conn.rollback()
@@ -119,6 +131,10 @@ def rows() -> FixtureRows:
     yield data
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                "delete from action_logs where id = any(%s)",
+                ([data.log_a, data.log_b],),
+            )
             cur.execute(
                 "delete from messages where id = any(%s)",
                 ([data.message_a, data.message_b],),
@@ -203,6 +219,16 @@ def test_rls_isolation_as_user_a(rows: FixtureRows) -> None:
                 (rows.doc_a,),
             )
             assert cur.fetchone()[0] == 1
+            cur.execute(
+                "select count(*) from action_logs where user_id = %s",
+                (rows.user_a,),
+            )
+            assert cur.fetchone()[0] == 1
+            cur.execute(
+                "select count(*) from action_logs where user_id = %s",
+                (rows.user_b,),
+            )
+            assert cur.fetchone()[0] == 0
     finally:
         conn.close()
 
@@ -228,6 +254,20 @@ def test_rls_blocks_cross_owner_writes(rows: FixtureRows) -> None:
                     (rows.user_b, "sneaky.pdf", f"{rows.user_b}/docs/sneaky.pdf"),
                 )
             conn.rollback()
+    finally:
+        conn.close()
+
+    # Fresh role-switched connection per attempt: a psycopg rollback reverts
+    # the session's SET ROLE/claim, so later attempts must re-establish them.
+    conn = _as_role(rows, str(rows.user_a))
+    try:
+        with conn.cursor() as cur:
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                cur.execute(
+                    "insert into action_logs (user_id, action_type, filename) "
+                    "values (%s, 'upload', 'sneaky.pdf')",
+                    (rows.user_b,),
+                )
     finally:
         conn.close()
 

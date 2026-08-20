@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.security.identity import Identity
 from app.providers.storage.base import StorageError, StorageProvider, validate_key
+from app.services.action_logs import record_event
 from app.services.text_clean import strip_control_chars
 
 logger = getLogger(__name__)
@@ -73,7 +74,7 @@ _SOFT_DELETE = text(
     update documents
     set deleted_at = now(), updated_at = now()
     where id = :document_id and user_id = :user_id and deleted_at is null
-    returning storage_path
+    returning storage_path, filename
     """
 )
 
@@ -102,7 +103,7 @@ _CANCEL = text(
         updated_at = now()
     where id = :document_id and user_id = :user_id
       and deleted_at is null and status in ('uploaded', 'processing')
-    returning id
+    returning id, filename
     """
 )
 
@@ -219,7 +220,9 @@ async def create_document(
         )
 
     if replace:
-        replaced_id = await supersede_active_duplicates(db, identity, display_name)
+        replaced_id, superseded_ids = await supersede_active_duplicates(
+            db, identity, display_name
+        )
     else:
         duplicate = await find_active_duplicate(db, identity, display_name)
         if duplicate is not None:
@@ -228,6 +231,7 @@ async def create_document(
                 f'A file named "{display_name}" is already in your library',
             )
         replaced_id = None
+        superseded_ids = []
 
     document_id = uuid.uuid4()
     storage_path = f"{identity.user_id}/docs/{document_id}.pdf"
@@ -262,6 +266,32 @@ async def create_document(
     except StorageError as exc:
         raise UploadFailedError("upload failed") from exc
 
+    # Recorded in the caller's transaction after the object exists, so a storage
+    # failure rolls the event back with the row (order: upload → replace → superseded).
+    await record_event(
+        db,
+        user_id=identity.user_id,
+        action_type="upload",
+        filename=display_name,
+        document_id=document_id,
+    )
+    if replaced_id is not None:
+        await record_event(
+            db,
+            user_id=identity.user_id,
+            action_type="replace",
+            filename=display_name,
+            document_id=document_id,
+        )
+        for old_id in superseded_ids:
+            await record_event(
+                db,
+                user_id=identity.user_id,
+                action_type="superseded",
+                filename=display_name,
+                document_id=old_id,
+            )
+
     return _serialize(row)
 
 
@@ -283,8 +313,12 @@ async def supersede_active_duplicates(
     db: AsyncSession,
     identity: Identity,
     filename: str,
-) -> uuid.UUID | None:
-    """Mark every active row with this name 'superseded' and return the last id.
+) -> tuple[uuid.UUID | None, list[uuid.UUID]]:
+    """Mark every active row with this name 'superseded'.
+
+    Returns (last superseded id, all superseded ids): the first feeds the
+    replacement row's replaces_document_id, the second lets the caller record
+    one 'superseded' event per replaced row.
 
     The chunk purge is deferred: the replace resolution trigger (migration
     0005) purges the old chunks when the replacement becomes 'ready' and
@@ -293,6 +327,7 @@ async def supersede_active_duplicates(
     a failed upload (storage error) rolls the supersede back.
     """
     replaced: uuid.UUID | None = None
+    superseded: list[uuid.UUID] = []
     while True:
         result = await db.execute(
             _FIND_ACTIVE_DUPLICATE,
@@ -300,11 +335,12 @@ async def supersede_active_duplicates(
         )
         row = result.one_or_none()
         if row is None:
-            return replaced
+            return replaced, superseded
         await db.execute(
             _SUPERSEDE,
             {"document_id": str(row.id), "user_id": str(identity.user_id)},
         )
+        superseded.append(row.id)
         replaced = row.id
 
 
@@ -360,6 +396,13 @@ async def delete_document(
     if row is None:
         raise DocumentNotFoundError("document not found")
     await db.execute(_PURGE_CHUNKS, {"document_id": str(document_id)})
+    await record_event(
+        db,
+        user_id=identity.user_id,
+        action_type="delete",
+        filename=row.filename,
+        document_id=document_id,
+    )
     storage_path = row.storage_path
     try:
         await storage.delete(key=storage_path)
@@ -401,6 +444,13 @@ async def reprocess_document(
             "only failed or cancelled documents can be reprocessed"
         )
     await db.execute(_PURGE_CHUNKS, {"document_id": str(document_id)})
+    await record_event(
+        db,
+        user_id=identity.user_id,
+        action_type="reprocess",
+        filename=row.filename,
+        document_id=document_id,
+    )
     return _serialize(row)
 
 
@@ -431,6 +481,13 @@ async def cancel_document(
         raise CancelNotAllowedError(
             "only queued or processing documents can be cancelled"
         )
+    await record_event(
+        db,
+        user_id=identity.user_id,
+        action_type="cancel",
+        filename=row.filename,
+        document_id=document_id,
+    )
 
 
 async def get_document_download_url(

@@ -168,7 +168,44 @@ event: error  data: {"message": "…"}           # terminal on provider failure
 Client sends `Idempotency-Key: <uuid>` on POST; backend dedupes the user message by
 `(conversation_id, key)` and resumes/returns the same message id — safe retries on network drops.
 
-## 5. Files (read/preview)
+## 6. Logs
+
+| Method | URL | Body | Response | Errors |
+|---|---|---|---|---|
+| GET | `/logs` | – | `200 [log_entry]` (newest first) | 401, 422 (bad `action_type`, malformed/`to < from` dates, `offset` < 0, `limit` outside 1–100) |
+
+The action log (specs/016) records the caller's document actions and pipeline
+outcomes, newest first, paged by `offset`/`limit` (default 50, `limit` 1–100).
+
+Filters (all optional, combinable):
+- `action_type` — one of `upload`, `replace`, `delete`, `cancel`, `reprocess`,
+  `superseded`, `restored`, `processing_started`, `processing_succeeded`,
+  `processing_failed`; anything else → `422`.
+- `from` / `to` — ISO-8601 instants; date-only values (`YYYY-MM-DD`) are
+  interpreted as the whole UTC day (`from` = 00:00:00, `to` = 23:59:59.999).
+  Inclusive on both ends. Malformed values → `422`; `to < from` → `422`.
+
+Log entry object:
+```json
+{
+  "id": "uuid",
+  "action_type": "processing_failed",
+  "outcome": "failed",
+  "filename": "broken.pdf",
+  "document_id": "uuid|null",
+  "error_message": "corrupt xref table|null",
+  "error_trace": "Traceback (most recent call last):…|null",
+  "metadata": {"retry_count": 3},
+  "created_at": "…"
+}
+```
+
+`error_message`/`error_trace` are only set on `failed` entries (trace ≤ 8 KB,
+truncated server-side); successful entries carry `null`. `filename` is a
+snapshot that survives document deletion/replacement. Reads are owner-scoped —
+a caller never sees other tenants' entries (RLS + owner-scoped query).
+
+## 7. Files (read/preview)
 
 | Method | URL | Response | Notes |
 |---|---|---|---|
@@ -184,7 +221,7 @@ dev/CI-only and serves no expiry semantics (see `docs/security.md` §7).
 
 Explicitly, there is **no** static file-serving endpoint; signed URLs only.
 
-## 6. General error codes
+## 8. General error codes
 
 | Code | Meaning |
 |---|---|
@@ -198,7 +235,7 @@ Explicitly, there is **no** static file-serving endpoint; signed URLs only.
 | 500 | internal (structured-logged with request id) |
 | 502/503 | upstream AI/storage failure |
 
-## 7. Versioning & docs
+## 9. Versioning & docs
 
 All routes namespaced under `/api/v1`. FastAPI auto-serves OpenAPI at `/docs` in dev;
 disabled in prod unless flagged.

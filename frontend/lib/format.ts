@@ -12,6 +12,17 @@ export function formatDate(iso: string): string {
   });
 }
 
+/** Local timezone date + time for log entries (specs/016 FR-013). */
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 /** Today / Yesterday / MMM D / MMM D, YYYY (relative list timestamps). */
 export function formatDateRelative(iso: string): string {
   const date = new Date(iso);

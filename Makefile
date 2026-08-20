@@ -38,6 +38,11 @@ lint: ## Backend: ruff + mypy · Frontend: tsc + eslint (mirrors CI scope)
 	docker compose exec frontend npm run typecheck
 	docker compose exec frontend npm run lint
 
+frontend-gates: ## Frontend: tsc + eslint + production build (specs quickstarts)
+	docker compose exec frontend npm run typecheck
+	docker compose exec frontend npm run lint
+	docker compose exec frontend npm run build
+
 smoke: ## Playwright smoke on the full stack (needs db+backend+worker up)
 	# Runs on the host (playwright.config.ts spawns `npm run dev` on :3000).
 	# The compose frontend container also binds :3000, so it is parked for the

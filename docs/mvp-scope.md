@@ -19,6 +19,7 @@ Chat history (persistent conversations + messages)
 Source citations (filename + page)
 Multi-turn context (query rewrite + bounded history window, Phase 13)
 Multi-tenant security (RLS + query scoping + storage isolation)
+Action log (write-once event history + Logs page, Phase 14)
 ```
 
 ## 2. Deliberately deferred (even though obvious)

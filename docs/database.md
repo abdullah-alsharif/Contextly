@@ -16,6 +16,7 @@ erDiagram
   conversations ||--o{ conversation_documents : "1:N"
   documents ||--o{ conversation_documents : "1:N"
   conversations ||--o{ messages : "1:N"
+  profiles ||--o{ action_logs : "1:N"
 
   auth_users {
     uuid id PK
@@ -76,6 +77,18 @@ erDiagram
     int output_tokens
     float retrieval_ms
     float llm_ms
+    timestamptz created_at
+  }
+  action_logs {
+    uuid id PK
+    uuid user_id FK
+    text action_type
+    uuid document_id FK
+    text filename
+    text outcome
+    text error_message
+    text error_trace
+    jsonb metadata
     timestamptz created_at
   }
 ```
@@ -184,6 +197,37 @@ create table messages (
 );
 
 create index messages_conversation_created_idx on messages (conversation_id, created_at);
+
+-- User action logs (specs/016-user-action-logs): write-once history of the
+-- user's document actions and pipeline outcomes. RLS is the enforced tenant
+-- boundary: only a session carrying the owner's claim can insert (API via
+-- get_current_user, worker via _switch_to_owner) and only the owner can read.
+create table action_logs (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references profiles(id) on delete cascade,
+  action_type   text not null check (action_type in (
+                  'upload', 'replace', 'delete', 'cancel', 'reprocess',
+                  'superseded', 'restored',
+                  'processing_started', 'processing_succeeded',
+                  'processing_failed')),
+  document_id   uuid references documents(id) on delete set null,
+  filename      text not null,               -- snapshot; survives doc deletion/replacement
+  outcome       text not null default 'succeeded' check (outcome in ('succeeded', 'failed')),
+  error_message text,                        -- failure reason (mirrors documents.status_error)
+  error_trace   text,                        -- captured traceback, truncated server-side (≤ 8 KB)
+  metadata      jsonb not null default '{}'::jsonb,
+  created_at    timestamptz not null default clock_timestamp()  -- statement time: events in one
+                                                                -- transaction keep real order
+);
+
+create index action_logs_user_created_idx on action_logs (user_id, created_at desc);
+
+alter table action_logs enable row level security;
+alter table action_logs force row level security;
+
+create policy action_logs_user_isolation on action_logs
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
 ```
 
 Notes:
@@ -225,6 +269,28 @@ DEFAULT PRIVILEGES` so future tables inherit the grants (see
 [multi-tenancy.md](multi-tenancy.md) §2). Runtime queries must use this role; the
 superuser is only for migrations/admin.
 
+### 2.5 Action log (write-once history)
+
+`action_logs` (migration 0010, extended by 0011) is a write-once, read-only event
+history for the Logs page (specs/016, docs/api.md §5):
+
+- **Write-once semantics:** rows are inserted by `record_event`
+  (`backend/app/services/action_logs.py`) from the same transaction as the
+  action they describe (a storage failure rolls the event back with the row).
+  There is no UPDATE/DELETE path in the app — the only way a row disappears is
+  profile deletion (cascade).
+- **Ordering:** `created_at` defaults to `clock_timestamp()` (statement time) so
+  events recorded in one transaction (e.g. `upload → replace → superseded`)
+  keep their real order; reads sort by `(created_at desc, id desc)`.
+- **Data kept:** `filename` is a snapshot (survives document deletion /
+  replacement); `document_id` is `on delete set null`; failed pipeline runs
+  carry `error_message` + `error_trace` (≤ 8 KB, server-truncated) and
+  `metadata.retry_count`; successful processing records `metadata.total_chunks`.
+- **Retention:** no TTL in MVP (bounded by `profiles` FK cascade on account
+  deletion); a cleanup job is a documented post-MVP option.
+- **RLS:** `action_logs_user_isolation` with `force row level security` — the
+  worker writes through `_switch_to_owner` (docs/multi-tenancy.md §2).
+
 ## 3. pgvector design
 
 - Column: `embedding vector(1024)` — dimension **must equal the locked embedding model's
@@ -244,7 +310,8 @@ superuser is only for migrations/admin.
 
 - **Migrations:** SQL files + a tiny migration runner (e.g. Alembic or plain
   `schema.sql` + numbered patches). Keep them in `infrastructure/migrations/`.
-- **No overengineering:** no shadow tables, no event log, no audit tables in MVP.
-  `messages.sources` snapshot is enough for source attribution.
+- **No overengineering:** no shadow tables, no audit tables beyond the single
+  `action_logs` table (docs/database.md §2.5) — `messages.sources` snapshot is
+  enough for source attribution.
 - **Seed data:** an `eval` user + a handful of eval PDFs (see [testing.md](testing.md))
   can be seeded via a script.

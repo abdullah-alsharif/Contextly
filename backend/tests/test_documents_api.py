@@ -139,6 +139,10 @@ def clean_documents_before_each_test() -> None:
                 "delete from documents where user_id in (%s, %s)",
                 (str(USER_A), str(USER_B)),
             )
+            cur.execute(
+                "delete from action_logs where user_id in (%s, %s)",
+                (str(USER_A), str(USER_B)),
+            )
         conn.commit()
     yield
 
@@ -1248,3 +1252,113 @@ def test_upload_after_delete_same_filename_201(client: TestClient) -> None:
     ).status_code == 204
     status, _ = _upload(client, token, filename="once.pdf")
     assert status == 201
+
+
+# ---------------------------------------------------------------------------
+# Action-log recording (US1): each API action produces exactly one row
+# ---------------------------------------------------------------------------
+
+
+def _log_rows(user: uuid.UUID) -> list[tuple[str, str, str]]:
+    """(action_type, filename, outcome) rows for a user, oldest first."""
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select action_type, filename, outcome from action_logs "
+                "where user_id = %s order by created_at, id",
+                (str(user),),
+            )
+            return cur.fetchall()
+
+
+def test_log_upload_records_one_row(client: TestClient) -> None:
+    token = _token(USER_A)
+    status, doc = _upload(client, token, filename="audit.pdf")
+    assert status == 201
+    assert _log_rows(USER_A) == [("upload", "audit.pdf", "succeeded")]
+
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select document_id from action_logs where user_id = %s",
+                (str(USER_A),),
+            )
+            assert cur.fetchone()[0] == uuid.UUID(doc["id"])
+
+
+def test_log_replace_records_replace_and_superseded(client: TestClient) -> None:
+    token = _token(USER_A)
+    assert _upload(client, token, filename="audit.pdf")[0] == 201
+    status, doc = _upload(client, token, filename="audit.pdf", replace=True)
+    assert status == 201
+    assert _log_rows(USER_A) == [
+        ("upload", "audit.pdf", "succeeded"),
+        ("upload", "audit.pdf", "succeeded"),
+        ("replace", "audit.pdf", "succeeded"),
+        ("superseded", "audit.pdf", "succeeded"),
+    ]
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select document_id from action_logs "
+                "where user_id = %s and action_type = 'replace'",
+                (str(USER_A),),
+            )
+            assert cur.fetchone()[0] == uuid.UUID(doc["id"])
+
+
+def test_log_delete_records_one_row(client: TestClient) -> None:
+    token = _token(USER_A)
+    _, doc = _upload(client, token, filename="audit.pdf")
+    assert client.delete(
+        f"/api/v1/documents/{doc['id']}", headers={"Authorization": f"Bearer {token}"}
+    ).status_code == 204
+    assert _log_rows(USER_A) == [
+        ("upload", "audit.pdf", "succeeded"),
+        ("delete", "audit.pdf", "succeeded"),
+    ]
+
+
+def test_log_cancel_records_one_row(client: TestClient) -> None:
+    token = _token(USER_A)
+    _, doc = _upload(client, token, filename="audit.pdf")
+    response = client.post(
+        f"/api/v1/documents/{doc['id']}/cancel",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 204
+    assert _log_rows(USER_A) == [
+        ("upload", "audit.pdf", "succeeded"),
+        ("cancel", "audit.pdf", "succeeded"),
+    ]
+
+
+def test_log_reprocess_records_one_row(client: TestClient) -> None:
+    token = _token(USER_A)
+    _, doc = _upload(client, token, filename="audit.pdf")
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update documents set status = 'failed', status_error = 'boom' "
+                "where id = %s",
+                (doc["id"],),
+            )
+        conn.commit()
+    response = client.patch(
+        f"/api/v1/documents/{doc['id']}/reprocess",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert _log_rows(USER_A) == [
+        ("upload", "audit.pdf", "succeeded"),
+        ("reprocess", "audit.pdf", "succeeded"),
+    ]
+
+
+def test_log_events_scoped_per_user(client: TestClient) -> None:
+    token_a, token_b = _token(USER_A), _token(USER_B)
+    assert _upload(client, token_a, filename="audit.pdf")[0] == 201
+    assert _upload(client, token_b, filename="audit.pdf")[0] == 201
+    assert len(_log_rows(USER_A)) == 1
+    assert [row[0] for row in _log_rows(USER_A)] == ["upload"]
+    assert [row[0] for row in _log_rows(USER_B)] == ["upload"]

@@ -114,11 +114,28 @@ other; definitions of done are explicit. Parallelizable tracks are marked ⚡.
   conversational fixtures clear recall@6 ≥ 0.85 (advisory gate); report committed;
   docs updated. Zero API/schema change.
 
+## Phase 14 — User action log
+- **Objective:** every user-facing document action and pipeline outcome lands in a
+  write-once `action_logs` row; the Logs page shows the history with
+  action/date filters and per-entry diagnostics (failure reason + stack trace).
+- **Components:** migration 0010 (`action_logs` + RLS, `clock_timestamp()`
+  ordering) + 0011 (`restored` event), `services/action_logs.py`
+  (`record_event`), capture points in `services/documents.py` +
+  `services/pipeline.py`, `api/logs.py` (`GET /api/v1/logs` with
+  `action_type`/`from`/`to` filters + paging), `app/(app)/logs` page +
+  `components/log-table.tsx` (chips, date range, one-at-a-time details),
+  sidebar Activity Log entry.
+- **Spec:** `specs/016-user-action-logs/`; details in [database.md](database.md)
+  §2.5, [api.md](api.md) §6, and [multi-tenancy.md](multi-tenancy.md) §2.
+- **DoD:** recording + RLS + API + filters tests green (425-test suite); frontend
+  gates (`tsc`, `eslint`, `build`) green; docs amended (FR-015); quickstart
+  verified.
+
 ## Dependency graph
 
 ```
 0 → 1 → 2 → 3 → 4 → 6 → 7 → 8
          │         ↕         ↓
-         └→ 5 ──────→ 9/10 → 11 → 12 → 13
+         └→ 5 ──────→ 9/10 → 11 → 12 → 13 → 14
 ```
 Legend: ⚂ parallelizable, ⚡ preloadable expertise.

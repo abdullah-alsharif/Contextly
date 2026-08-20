@@ -128,6 +128,20 @@ function DocumentsLink({ pathname }: { pathname: string }) {
         </span>
         <span className="font-display text-label-md">Documents</span>
       </Link>
+      <Link
+        href="/logs"
+        aria-current={pathname === "/logs" ? "page" : undefined}
+        className={`flex h-10 items-center gap-3 rounded-lg px-2.5 text-sm transition-colors duration-100 md:h-9 ${
+          pathname === "/logs"
+            ? "bg-sb-selected font-medium text-sb-text"
+            : "text-sb-text-secondary hover:bg-sb-hover hover:text-sb-text active:bg-sb-selected"
+        }`}
+      >
+        <span className="material-symbols-outlined text-[20px] text-sb-icon" aria-hidden="true">
+          list_alt
+        </span>
+        <span className="font-display text-label-md">Activity Log</span>
+      </Link>
     </div>
   );
 }
@@ -745,6 +759,7 @@ export default function Sidebar() {
           <div className="flex flex-col items-center gap-2 px-2 pb-2 pt-3">
             <RailLogo onExpand={toggleSidebar} />
             <IconButton size="lg" href="/documents" label="Documents" icon="description" />
+            <IconButton size="lg" href="/logs" label="Activity Log" icon="list_alt" />
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-4">

@@ -72,6 +72,52 @@ export interface Message {
   created_at: string;
 }
 
+// ---- Action logs (specs/016, contracts/logs.md §2) -------------------------
+
+export type ActionType =
+  | "upload"
+  | "replace"
+  | "delete"
+  | "cancel"
+  | "reprocess"
+  | "superseded"
+  | "restored"
+  | "processing_started"
+  | "processing_succeeded"
+  | "processing_failed";
+
+export interface LogEntry {
+  id: string;
+  action_type: ActionType;
+  outcome: "succeeded" | "failed";
+  filename: string;
+  document_id: string | null;
+  error_message: string | null;
+  error_trace: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ListLogsParams {
+  action_type?: ActionType;
+  /** UTC ISO instant (date-only values are interpreted as UTC-day bounds). */
+  from?: string;
+  to?: string;
+  offset?: number;
+  limit?: number;
+}
+
+export function listLogs(params: ListLogsParams = {}): Promise<LogEntry[]> {
+  const query = new URLSearchParams();
+  if (params.action_type) query.set("action_type", params.action_type);
+  if (params.from) query.set("from", params.from);
+  if (params.to) query.set("to", params.to);
+  if (params.offset !== undefined) query.set("offset", String(params.offset));
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  const qs = query.toString();
+  return request<LogEntry[]>(`/api/v1/logs${qs ? `?${qs}` : ""}`);
+}
+
 // ---- Errors ---------------------------------------------------------------
 
 export class ApiError extends Error {

@@ -48,6 +48,12 @@ Because the worker writes `status_error`, `retry_count`, `lease_until`, and mess
 carry `retrieval_ms`/`llm_ms`/tokens, a quick SQL read answers most "what happened"
 questions without log spelunking — deliberately, for a one-person ops load.
 
+Since Phase 14, the `action_logs` table (docs/database.md §2.5) adds a
+user-visible, RLS-scoped event history: `select … from action_logs where
+user_id = '<uid>' order by created_at desc` shows every upload/replace/delete/
+reprocess plus pipeline outcomes, with `error_message`/`error_trace` (≤ 8 KB)
+on failures — the Logs page is a read over this table (docs/api.md §6).
+
 ## 5. Tracing (future, only if needed)
 
 When latency questions become real, add OpenTelemetry spans on retrieval/LLM/pipeline

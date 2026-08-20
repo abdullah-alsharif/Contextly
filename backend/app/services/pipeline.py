@@ -11,6 +11,7 @@ the document (docs/ingestion.md §1).
 from __future__ import annotations
 
 import asyncio
+import traceback
 import uuid
 from dataclasses import dataclass
 from io import BytesIO
@@ -31,6 +32,7 @@ from app.providers.ai.base import (
     is_transient_status,
 )
 from app.providers.storage.base import StorageError, StorageProvider
+from app.services.action_logs import record_event
 from app.services.chunker import CHARS_PER_TOKEN, Chunk, ParseError, chunk_pages
 from app.services.text_clean import replace_control_chars
 
@@ -174,9 +176,23 @@ async def _switch_to_owner(db: AsyncSession, claimed: ClaimedDocument) -> None:
 
 
 async def _fail_permanent(
-    db: AsyncSession, claimed: ClaimedDocument, message: str
+    db: AsyncSession,
+    claimed: ClaimedDocument,
+    message: str,
+    trace: str | None = None,
 ) -> Outcome:
     await db.execute(_FAIL_PERMANENT, {"id": str(claimed.id), "message": message})
+    await record_event(
+        db,
+        user_id=claimed.user_id,
+        action_type="processing_failed",
+        filename=claimed.filename,
+        document_id=claimed.id,
+        outcome="failed",
+        error_message=message,
+        error_trace=trace,
+        metadata={"retry_count": claimed.retry_count},
+    )
     return "failed"
 
 
@@ -185,6 +201,7 @@ async def _fail_transient(
     settings: Settings,
     claimed: ClaimedDocument,
     message: str,
+    trace: str | None = None,
 ) -> Outcome:
     retry_count = claimed.retry_count + 1
     if retry_count < settings.worker_max_retries:
@@ -204,6 +221,17 @@ async def _fail_transient(
     await db.execute(
         _EXHAUST_RETRIES,
         {"id": str(claimed.id), "retry_count": retry_count, "message": message},
+    )
+    await record_event(
+        db,
+        user_id=claimed.user_id,
+        action_type="processing_failed",
+        filename=claimed.filename,
+        document_id=claimed.id,
+        outcome="failed",
+        error_message=message,
+        error_trace=trace,
+        metadata={"retry_count": retry_count},
     )
     return "failed"
 
@@ -234,6 +262,14 @@ async def _persist(
     )
     if result.one_or_none() is None:
         raise StaleClaimError("document deleted or re-claimed during processing")
+    await record_event(
+        db,
+        user_id=claimed.user_id,
+        action_type="processing_succeeded",
+        filename=claimed.filename,
+        document_id=claimed.id,
+        metadata={"total_chunks": len(chunks)},
+    )
 
 
 async def process_claimed_document(
@@ -253,6 +289,13 @@ async def process_claimed_document(
     'cancelled' and nothing persists.
     """
     await _switch_to_owner(db, claimed)
+    await record_event(
+        db,
+        user_id=claimed.user_id,
+        action_type="processing_started",
+        filename=claimed.filename,
+        document_id=claimed.id,
+    )
     started = perf_counter()
     try:
         try:
@@ -262,7 +305,13 @@ async def process_claimed_document(
             logger.warning(
                 "doc %s transient failure | class=transient | %s", claimed.id, message
             )
-            return await _fail_transient(db, settings, claimed, message)
+            return await _fail_transient(
+                db,
+                settings,
+                claimed,
+                message,
+                trace=traceback.format_exc(),
+            )
 
         if not await _check_active(db, claimed):
             logger.info("doc %s cancelled | stage=parse", claimed.id)
@@ -275,7 +324,9 @@ async def process_claimed_document(
             logger.warning(
                 "doc %s permanent failure | class=permanent | %s", claimed.id, message
             )
-            return await _fail_permanent(db, claimed, message)
+            return await _fail_permanent(
+                db, claimed, message, trace=traceback.format_exc()
+            )
 
         try:
             chunk_size_chars = clamp_chunk_size_chars(
@@ -292,7 +343,9 @@ async def process_claimed_document(
             logger.warning(
                 "doc %s permanent failure | class=permanent | %s", claimed.id, message
             )
-            return await _fail_permanent(db, claimed, message)
+            return await _fail_permanent(
+                db, claimed, message, trace=traceback.format_exc()
+            )
 
         batch_size = settings.embedding_batch_size
         embeddings: list[list[float]] = []
@@ -316,18 +369,32 @@ async def process_claimed_document(
                         claimed.id,
                         message,
                     )
-                    return await _fail_permanent(db, claimed, message)
+                    return await _fail_permanent(
+                        db, claimed, message, trace=traceback.format_exc()
+                    )
                 message = f"embedding failed: {exc}"
                 logger.warning(
                     "doc %s transient failure | class=transient | %s", claimed.id, message
                 )
-                return await _fail_transient(db, settings, claimed, message)
+                return await _fail_transient(
+                    db,
+                    settings,
+                    claimed,
+                    message,
+                    trace=traceback.format_exc(),
+                )
             except Exception as exc:
                 message = f"embedding failed: {exc}"
                 logger.warning(
                     "doc %s transient failure | class=transient | %s", claimed.id, message
                 )
-                return await _fail_transient(db, settings, claimed, message)
+                return await _fail_transient(
+                    db,
+                    settings,
+                    claimed,
+                    message,
+                    trace=traceback.format_exc(),
+                )
 
         if not await _check_active(db, claimed):
             logger.info("doc %s cancelled | stage=persist | chunks=%d", claimed.id, len(chunks))
@@ -346,7 +413,9 @@ async def process_claimed_document(
             claimed.id,
             message,
         )
-        return await _fail_transient(db, settings, claimed, message)
+        return await _fail_transient(
+            db, settings, claimed, message, trace=traceback.format_exc()
+        )
 
     logger.info(
         "doc %s done | stage=finalize | duration_ms=%.0f | page_count=%d | chunk_count=%d | total_tokens=%d | embedding_model=%s",

@@ -18,14 +18,18 @@ layers. Defense in depth: every layer must fail closed on its own.
 ## 2. RLS design
 
 RLS is enabled on `profiles`, `documents`, `conversations`, `conversation_documents`,
-`messages`. `document_chunks` is protected through a subquery on `documents` (chunks
-have no `user_id` column — avoids denormalizing the tenant key).
+`messages`, `action_logs`. `document_chunks` is protected through a subquery on
+`documents` (chunks have no `user_id` column — avoids denormalizing the tenant
+key). `action_logs` (specs/016) carries its own `user_id` and is write-once:
+the only writers are the API (via `get_current_user`) and the worker (via
+`_switch_to_owner`), and only the owner can read (docs/database.md §2.5).
 
 ```sql
 alter table documents enable row level security;
 alter table conversations enable row level security;
 alter table conversation_documents enable row level security;
 alter table messages enable row level security;
+alter table action_logs enable row level security;
 alter table document_chunks enable row level security;
 alter table profiles enable row level security;
 
@@ -34,6 +38,7 @@ alter table documents force row level security;
 alter table conversations force row level security;
 alter table conversation_documents force row level security;
 alter table messages force row level security;
+alter table action_logs force row level security;
 alter table document_chunks force row level security;
 alter table profiles force row level security;
 
@@ -68,6 +73,11 @@ create policy chunks_user_isolation on document_chunks
 create policy profiles_user_isolation on profiles
   using (id = auth.uid())
   with check (id = auth.uid());
+
+-- action_logs: owner-only read and insert (worker writes via _switch_to_owner)
+create policy action_logs_user_isolation on action_logs
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
 ```
 
 ### How it works with Supabase
@@ -120,9 +130,12 @@ it never reads storage via user tokens (uses a service credential with a
 | User A crafts a vector-search request with B's doc ids | Retrieval filters documents by `conversation_id` which is user-owned |
 | User A guesses B's storage path | Storage policies reject cross-user paths |
 | User A calls the worker endpoints | Worker has no public endpoints; API-only surface |
+| User A reads `GET /logs` for B's activity | Owner-scoped query + `action_logs` RLS (write-once; worker inserts carry the owner claim) |
 | Service-role key leak | Runtime code never uses it; it lives only in CI/migrations secrets |
 
 ## 6. Tests that must pass (written early)
 
 See [testing.md](testing.md) — a dedicated integration test matrix asserts every one
-of these scenarios as 403/404/empty with two real users.
+of these scenarios as 403/404/empty with two real users. The `action_logs` matrix
+(RLS insert/read isolation, worker-inserted rows visible only to the owner) is
+covered in `backend/tests/test_rls.py` + `test_logs_api.py`.

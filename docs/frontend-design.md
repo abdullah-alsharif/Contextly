@@ -105,6 +105,30 @@ the display name (full name); the sidebar user chip shows the name when set
 (falling back to email); `/settings` edits the name via
 `PATCH /auth/me` (email is read-only).
 
+### `/logs` — activity log (Phase 14)
+
+```
+PageTitleBar ("Activity Log" + subtitle)
+  └ container max-w-container-max
+    └ log-table (rounded-xl border, bg-surface)
+        └ Filter toolbar
+        │   └ action-type chips (All + 10, aria-pressed, secondary when active)
+        │   └ From/To date inputs (local date → UTC ISO; Clear filters when any active)
+        └ Rows (newest first)
+        │   └ desktop: Action icon+label / File / Outcome pill / When / Details chevron
+        │   └ mobile: stacked cards + Details toggle
+        │   └ expanded pane (one at a time, aria-expanded): error message + stack
+        │     trace (font-mono, max-h-48 scroll) + metadata (retries/chunks/size/doc)
+        └ Load more footer (page-size 50)
+```
+
+States: loading → `EmptyState` "Loading activity…"; error → inline error box;
+no rows + no filters → `EmptyState` "No activity yet"; no rows + filters active
+→ `EmptyState` "No matches" while the filter toolbar stays visible (Clear
+filters reachable). Failed entries render the reason inline in error tone;
+`processing_failed`/`delete` rows use the `report` icon, others `history`.
+Filters live on the page (own state + `useLogs`), the table is presentational.
+
 ## 5. Margins/borders conventions
 
 - `h-screen overflow-hidden`, content region scrolls; sidebar fixed.
